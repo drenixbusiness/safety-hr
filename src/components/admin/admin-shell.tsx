@@ -3,11 +3,9 @@
 import {
   Bell,
   ChevronDown,
-  ClipboardCheck,
-  FileBarChart,
   LayoutDashboard,
   Menu,
-  Settings,
+  ShieldAlert,
   ShieldCheck,
   Users,
   X,
@@ -33,6 +31,31 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { label: "Overview", href: "/", icon: LayoutDashboard },
+  {
+    label: "Safety & Compliance",
+    href: "/safety-compliance",
+    icon: ShieldAlert,
+    children: [
+      { label: "Dashboard", href: "/safety-compliance" },
+      { label: "Inspections", href: "/safety-compliance/inspections" },
+      {
+        label: "Driver Scorecard",
+        href: "/safety-compliance/driver-scorecard",
+      },
+      {
+        label: "Violation Categories",
+        href: "/safety-compliance/violation-categories",
+      },
+      {
+        label: "Financial Impact",
+        href: "/safety-compliance/financial-impact",
+      },
+      {
+        label: "Fleet & Plate Costs",
+        href: "/safety-compliance/fleet-plate-costs",
+      },
+    ],
+  },
   {
     label: "List of HR's",
     href: "/hr-list",

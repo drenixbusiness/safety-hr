@@ -732,7 +732,7 @@ export function TablePlaceholder({
   ) => (
     <div
       className={`relative w-full bg-zinc-50 ${className} ${
-        isWeekly ? "pb-4" : ""
+        weeklyScrollable ? "pb-4" : ""
       }`}
       style={{ minHeight: `${timelineZoneHeight}px` }}
     >
@@ -746,13 +746,13 @@ export function TablePlaceholder({
       </div>
 
       <div className="relative">
-        {drivers.map((driver) => {
+        {drivers.map((driver, index) => {
           const segment = getBarSegment(driver, items);
 
           return (
             <div
               className="grid border-b border-zinc-100 last:border-b-0"
-              key={`${driver.name}-${driver.start}-${driver.end}-${items[0].value}`}
+              key={`${driver.name}-${driver.start}-${driver.end}-${items[0].value}-${index}`}
               style={{
                 gridTemplateColumns: chartColumns,
                 height: `${rowHeight}px`,

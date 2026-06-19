@@ -1,0 +1,525 @@
+import {
+  formatCurrency,
+  formatDate,
+  monthKey,
+  monthLabelFromKey,
+  riskLabelFromPoints,
+  type FleetCostRecord,
+  type DriverChargeRecord,
+  type InspectionRecord,
+  type RiskLevel,
+  type ViolationCategory,
+  canonicalizeFinancialReason,
+} from "@/lib/safety-compliance-data";
+
+export type MonthlyPoint = {
+  month: string;
+  label: string;
+  value: number;
+};
+
+export type DriverSummary = {
+  driver: string;
+  totalInspections: number;
+  totalViolationPoints: number;
+  totalCharges: number;
+  oosViolations: number;
+  repeatViolations: number;
+  riskLevel: RiskLevel;
+  lastInspectionDate: string;
+  previousMonthPoints: number;
+  monthTrend: number;
+};
+
+export type CategorySummary = {
+  category: ViolationCategory;
+  numberOfViolations: number;
+  totalPoints: number;
+  totalCharges: number;
+  mostCommonReason: string;
+  driversInvolved: number;
+};
+
+export type FleetSummary = {
+  unit: string;
+  vin: string;
+  year: number;
+  make: string;
+  plate: string;
+  price: number;
+  totalPrice: number;
+  expenseType: string;
+  driverName?: string;
+  notes?: string;
+};
+
+export type FinancialImpactRow = {
+  driver: string;
+  chargeAmount: number;
+  chargeReason: string;
+  safetyLossImpact: number;
+  companyExpenseImpact: number;
+  inspectionDate: string;
+  reportNo: string;
+};
+
+type MonthlyBucket = {
+  key: string;
+  totalPoints: number;
+  totalCharges: number;
+  inspectionCount: number;
+  oosCount: number;
+};
+
+function monthSort(a: string, b: string) {
+  return a.localeCompare(b);
+}
+
+export function uniqueSortedMonths(records: InspectionRecord[]) {
+  return Array.from(new Set(records.map((record) => monthKey(record.inspectionDate)))).sort(
+    monthSort,
+  );
+}
+
+export function aggregateMonthlyInspectionData(records: InspectionRecord[]) {
+  const buckets = new Map<string, MonthlyBucket>();
+  for (const record of records) {
+    if (record.inspectionDate > "2026-12-31") continue;
+    const key = monthKey(record.inspectionDate);
+    const bucket =
+      buckets.get(key) ?? {
+        key,
+        totalPoints: 0,
+        totalCharges: 0,
+        inspectionCount: 0,
+        oosCount: 0,
+      };
+    bucket.totalPoints += record.totalViolationPoints;
+    bucket.totalCharges += record.chargeAmount;
+    bucket.inspectionCount += 1;
+    bucket.oosCount += record.status === "OOS" ? 1 : 0;
+    buckets.set(key, bucket);
+  }
+
+  return Array.from(buckets.values())
+    .sort((a, b) => monthSort(a.key, b.key))
+    .map((bucket) => ({
+      month: bucket.key,
+      label: monthLabelFromKey(bucket.key),
+      points: bucket.totalPoints,
+      charges: bucket.totalCharges,
+      inspections: bucket.inspectionCount,
+      oos: bucket.oosCount,
+    }));
+}
+
+function riskRank(level: RiskLevel) {
+  switch (level) {
+    case "High":
+      return 3;
+    case "Medium":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+function maxRiskLevel(records: InspectionRecord[]): RiskLevel {
+  return records.reduce<RiskLevel>(
+    (current, record) =>
+      riskRank(record.riskLevel) > riskRank(current) ? record.riskLevel : current,
+    "Low",
+  );
+}
+
+export function aggregateDriverSummaries(records: InspectionRecord[]) {
+  const grouped = new Map<string, InspectionRecord[]>();
+  for (const record of records) {
+    const current = grouped.get(record.driver) ?? [];
+    current.push(record);
+    grouped.set(record.driver, current);
+  }
+
+  const latestMonth = records
+    .map((record) => monthKey(record.inspectionDate))
+    .sort(monthSort)
+    .at(-1);
+  const previousMonth = latestMonth
+    ? new Date(Number(latestMonth.slice(0, 4)), Number(latestMonth.slice(5, 7)) - 2, 1)
+    : null;
+  const previousMonthKey = previousMonth
+    ? `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, "0")}`
+    : "";
+
+  return Array.from(grouped.entries())
+    .map(([driver, driverRecords]) => {
+      const totalViolationPoints = driverRecords.reduce(
+        (sum, record) => sum + record.totalViolationPoints,
+        0,
+      );
+      const totalCharges = driverRecords.reduce(
+        (sum, record) => sum + record.chargeAmount,
+        0,
+      );
+      const oosViolations = driverRecords.reduce(
+        (sum, record) => sum + record.oosViolations,
+        0,
+      );
+      const repeatViolations = Math.max(0, driverRecords.length - 1);
+      const lastInspectionDate = driverRecords
+        .map((record) => record.inspectionDate)
+        .sort(monthSort)
+        .at(-1) as string;
+      const currentMonthPoints = driverRecords
+        .filter((record) => monthKey(record.inspectionDate) === latestMonth)
+        .reduce((sum, record) => sum + record.totalViolationPoints, 0);
+      const lastMonthPoints = driverRecords
+        .filter((record) => monthKey(record.inspectionDate) === previousMonthKey)
+        .reduce((sum, record) => sum + record.totalViolationPoints, 0);
+
+      return {
+        driver,
+        totalInspections: driverRecords.length,
+        totalViolationPoints,
+        totalCharges,
+        oosViolations,
+        repeatViolations,
+        riskLevel: maxRiskLevel(driverRecords),
+        lastInspectionDate,
+        previousMonthPoints: lastMonthPoints,
+        monthTrend: currentMonthPoints - lastMonthPoints,
+      } satisfies DriverSummary;
+    })
+    .sort((a, b) => b.totalViolationPoints - a.totalViolationPoints);
+}
+
+export function aggregateRiskLevels(records: InspectionRecord[]) {
+  const summary = {
+    Low: 0,
+    Medium: 0,
+    High: 0,
+  } satisfies Record<RiskLevel, number>;
+
+  for (const record of records) {
+    summary[record.riskLevel] += 1;
+  }
+
+  return Object.entries(summary).map(([riskLevel, value]) => ({
+    riskLevel,
+    value,
+  }));
+}
+
+export function aggregateCategories(records: InspectionRecord[]) {
+  const grouped = new Map<
+    ViolationCategory,
+    {
+      numberOfViolations: number;
+      totalPoints: number;
+      totalCharges: number;
+      reasons: Map<string, number>;
+      drivers: Set<string>;
+    }
+  >();
+
+  const ensureBucket = (cat: ViolationCategory) => {
+    if (!grouped.has(cat)) {
+      grouped.set(cat, {
+        numberOfViolations: 0,
+        totalPoints: 0,
+        totalCharges: 0,
+        reasons: new Map<string, number>(),
+        drivers: new Set<string>(),
+      });
+    }
+    return grouped.get(cat)!;
+  };
+
+  for (const record of records) {
+    const categoriesFound = getRecordCategories(record);
+
+    for (const cat of categoriesFound) {
+      const bucket = ensureBucket(cat);
+      bucket.numberOfViolations += 1;
+      bucket.drivers.add(record.driver);
+
+      // Distribute points and charges?
+      // For now, let's attribute the full points/charges to each category involved
+      // which is better than ignoring them, though it might overcount totals in the category summary.
+      // But usually, one inspection has one set of points/charges for all violations.
+      bucket.totalPoints += record.totalViolationPoints;
+      bucket.totalCharges += record.chargeAmount;
+
+      let specificReason = "Unknown";
+      if (cat === "Unsafe Driving") specificReason = record.unsafeDrivingReason || "Unsafe Driving";
+      else if (cat === "Hours-of-Service Compliance") specificReason = record.hosComplianceReason || "HOS Violation";
+      else if (cat === "Vehicle Maintenance") specificReason = record.vehicleMaintenanceReason || "Maintenance Issue";
+      else if (cat === "Controlled Substances and Alcohol") specificReason = record.alcoholSubstanceReason || "Substance Issue";
+      else if (cat === "Crash Indicator") specificReason = record.crashIndicatorReason || "Crash Related";
+      else if (cat === "Documents / Registration") specificReason = record.documentsRegistrationReason || "Doc/Reg Issue";
+      else specificReason = record.violationReason;
+
+      bucket.reasons.set(specificReason, (bucket.reasons.get(specificReason) ?? 0) + 1);
+    }
+  }
+
+  return Array.from(grouped.entries())
+    .map(([category, bucket]) => {
+      const mostCommonReason =
+        Array.from(bucket.reasons.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ??
+        "N/A";
+
+      return {
+        category,
+        numberOfViolations: bucket.numberOfViolations,
+        totalPoints: bucket.totalPoints,
+        totalCharges: bucket.totalCharges,
+        mostCommonReason,
+        driversInvolved: bucket.drivers.size,
+      } satisfies CategorySummary;
+    })
+    .sort((a, b) => b.totalPoints - a.totalPoints);
+}
+
+export function aggregateFleetCosts(records: FleetCostRecord[]) {
+  return [...records].sort((a, b) => b.totalPrice - a.totalPrice);
+}
+
+export function aggregateMonthlyFleetData(records: FleetCostRecord[]) {
+  const buckets = new Map<string, number>();
+  for (const record of records) {
+    if (record.recordDate > "2026-12-31") continue;
+    const key = monthKey(record.recordDate);
+    buckets.set(key, (buckets.get(key) ?? 0) + record.totalPrice);
+  }
+
+  return Array.from(buckets.entries())
+    .sort((a, b) => monthSort(a[0], b[0]))
+    .map(([month, value]) => ({
+      month,
+      label: monthLabelFromKey(month),
+      value,
+    }));
+}
+
+export function aggregateChargesByReason(records: InspectionRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    const reason = canonicalizeFinancialReason(record.violationReason);
+    grouped.set(reason, (grouped.get(reason) ?? 0) + record.chargeAmount);
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateChargesByDriver(records: InspectionRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    grouped.set(record.driver, (grouped.get(record.driver) ?? 0) + record.chargeAmount);
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateChargesByCategory(records: InspectionRecord[]) {
+  const grouped = new Map<ViolationCategory, number>();
+  for (const record of records) {
+    const cats = getRecordCategories(record);
+    for (const cat of cats) {
+      grouped.set(cat, (grouped.get(cat) ?? 0) + record.chargeAmount);
+    }
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateSafetyLossByCategory(records: InspectionRecord[]) {
+  const grouped = new Map<ViolationCategory, number>();
+  for (const record of records) {
+    const cats = getRecordCategories(record);
+    for (const cat of cats) {
+      grouped.set(cat, (grouped.get(cat) ?? 0) + record.safetyLossImpact);
+    }
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function buildMonthlyCategoryTrend(records: InspectionRecord[]) {
+  const months = Array.from(new Set(records.map((record) => monthKey(record.inspectionDate)))).sort();
+  const categories = [
+    "Unsafe Driving",
+    "Hours-of-Service Compliance",
+    "Vehicle Maintenance",
+    "Crash Indicator",
+    "Controlled Substances and Alcohol",
+    "Documents / Registration",
+    "Other",
+  ] as const;
+
+  return months.map((month) => {
+    const entry: Record<string, number | string> = { month, label: monthLabelFromKey(month) };
+    for (const category of categories) {
+      entry[category] = records.filter((record) => {
+        if (monthKey(record.inspectionDate) !== month) return false;
+        const cats = getRecordCategories(record);
+        return cats.has(category);
+      }).length;
+    }
+    return entry;
+  });
+}
+
+function getRecordCategories(record: InspectionRecord): Set<ViolationCategory> {
+  const categoriesFound = new Set<ViolationCategory>();
+
+  if (record.unsafeDrivingReason) categoriesFound.add("Unsafe Driving");
+  if (record.hosComplianceReason) categoriesFound.add("Hours-of-Service Compliance");
+  if (record.vehicleMaintenanceReason) categoriesFound.add("Vehicle Maintenance");
+  if (record.alcoholSubstanceReason) categoriesFound.add("Controlled Substances and Alcohol");
+  if (record.crashIndicatorReason) categoriesFound.add("Crash Indicator");
+  if (record.documentsRegistrationReason) categoriesFound.add("Documents / Registration");
+
+  if (categoriesFound.size === 0 && record.violationCategory !== "Other") {
+    categoriesFound.add(record.violationCategory);
+  }
+
+  if (categoriesFound.size === 0 && (record.totalViolationPoints > 0 || record.chargeAmount > 0)) {
+    categoriesFound.add("Other");
+  }
+
+  return categoriesFound;
+}
+
+export function aggregateCompanyExpenseByType(records: InspectionRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    grouped.set(
+      record.expenseType,
+      (grouped.get(record.expenseType) ?? 0) + record.companyExpenseImpact,
+    );
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateFleetByUnit(records: FleetCostRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    grouped.set(record.unit, (grouped.get(record.unit) ?? 0) + record.totalPrice);
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateFleetByPlate(records: FleetCostRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    grouped.set(record.plate, (grouped.get(record.plate) ?? 0) + record.totalPrice);
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateFleetByExpenseType(records: FleetCostRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    grouped.set(record.expenseType, (grouped.get(record.expenseType) ?? 0) + record.totalPrice);
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateFleetCostByYear(records: FleetCostRecord[]) {
+  const grouped = new Map<string, number>();
+
+  for (const record of records) {
+    const yearNum = Number(record.year);
+    if (yearNum === 0 || yearNum > 2026) continue;
+    const year = String(record.year);
+    grouped.set(year, (grouped.get(year) ?? 0) + record.totalPrice);
+  }
+
+  return Array.from(grouped.entries())
+    .map(([year, value]) => ({ year, value }))
+    .sort((a, b) => a.year.localeCompare(b.year));
+}
+
+export function aggregateDriverChargesByDriver(records: DriverChargeRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    grouped.set(record.driver, (grouped.get(record.driver) ?? 0) + record.amount);
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateDriverChargesByReason(records: DriverChargeRecord[]) {
+  const grouped = new Map<string, number>();
+  for (const record of records) {
+    const reason = canonicalizeFinancialReason(record.reason);
+    grouped.set(reason, (grouped.get(reason) ?? 0) + record.amount);
+  }
+  return Array.from(grouped.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+}
+
+export function buildFinancialImpactRows(
+  inspections: InspectionRecord[],
+  driverCharges: DriverChargeRecord[],
+) {
+  return inspections.map((inspection) => {
+    const matchedCharge =
+      driverCharges.find(
+        (record) =>
+          record.inspectionDate === inspection.inspectionDate &&
+          record.driver.toUpperCase() === inspection.driver.toUpperCase(),
+      ) ?? null;
+
+    return {
+      driver: inspection.driver,
+      chargeAmount: matchedCharge?.amount ?? inspection.chargeAmount,
+      chargeReason: canonicalizeFinancialReason(matchedCharge?.reason ?? inspection.violationReason),
+      safetyLossImpact: inspection.safetyLossImpact,
+      companyExpenseImpact: inspection.companyExpenseImpact,
+      inspectionDate: inspection.inspectionDate,
+      reportNo: inspection.reportNo,
+    } satisfies FinancialImpactRow;
+  });
+}
+
+export function topInspectionsByPoints(records: InspectionRecord[]) {
+  return [...records]
+    .sort((a, b) => b.totalViolationPoints - a.totalViolationPoints)
+    .slice(0, 10);
+}
+
+export function topDriversByCharges(records: InspectionRecord[]) {
+  const summaries = aggregateDriverSummaries(records);
+  return [...summaries].sort((a, b) => b.totalCharges - a.totalCharges).slice(0, 10);
+}
+
+export function formatTrend(value: number) {
+  if (value === 0) return "0";
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
+export function mostExpensiveItemName<T extends { totalPrice: number; unit?: string; plate?: string }>(
+  records: T[],
+) {
+  const top = [...records].sort((a, b) => b.totalPrice - a.totalPrice)[0];
+  if (!top) return "N/A";
+  return top.unit ?? top.plate ?? "N/A";
+}
+
+export { formatCurrency, formatDate };
