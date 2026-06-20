@@ -373,10 +373,10 @@ function DriverDetailsModal({
   return (
     <div
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/55 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-zinc-950/55 p-4 backdrop-blur-sm sm:items-center"
       role="dialog"
     >
-      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl">
+      <div className="my-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-zinc-200 bg-gradient-to-r from-emerald-50 via-white to-zinc-50 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
@@ -411,12 +411,12 @@ function DriverDetailsModal({
 
 function DriverDetailSection({ section }: { section: DriverDetailTable }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+    <section className="flex max-h-[26rem] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-5 py-4">
         <h4 className="text-sm font-semibold text-zinc-950">{section.title}</h4>
         <p className="mt-1 text-sm text-zinc-500">{section.description}</p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="max-h-[20rem] overflow-x-auto overflow-y-auto">
         <table className="min-w-full border-separate border-spacing-0">
           <thead>
             <tr className="bg-zinc-50 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-500">

@@ -156,12 +156,14 @@ function ChartCard({
   children,
   className = "",
   subtitle,
+  contentClassName = "h-72",
 }: {
   title: string;
   icon: typeof BarChart3;
   children: ReactNode;
   className?: string;
   subtitle?: string;
+  contentClassName?: string;
 }) {
   return (
     <section className={`w-full rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm ${className}`}>
@@ -174,8 +176,37 @@ function ChartCard({
           <Icon className="size-4" aria-hidden="true" />
         </div>
       </div>
-      <div className="h-72 w-full min-w-0">{children}</div>
+      <div className={`w-full min-w-0 ${contentClassName}`}>{children}</div>
     </section>
+  );
+}
+
+function ChartLegend({
+  items,
+}: {
+  items: Array<{ label: string; color: string }>;
+}) {
+  return (
+    <div className="mx-auto flex w-fit max-w-170 flex-wrap items-center justify-center gap-3 px-2 pt-3 text-[14px] leading-none sm:text-[15px]">
+      {items.map((item) => (
+        <div
+          key={item.label}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap font-normal"
+          style={{ color: item.color }}
+        >
+          <span
+            className="size-2.5 border-solid"
+            style={{
+              backgroundColor: item.color,
+              borderColor: item.color,
+              borderWidth: "5px",
+              marginRight: "10px",
+            }}
+          />
+          <span className="leading-none">{item.label}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -686,24 +717,33 @@ function DashboardSection() {
         </ChartCard>
 
         <ChartCard title="Violations by Category" icon={ShieldAlert}>
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-            <PieChart>
-              <Pie
-                data={violationsByCategoryChart}
-                dataKey="value"
-                nameKey="name"
-                innerRadius={55}
-                outerRadius={90}
-                paddingAngle={2}
-              >
-                {violationsByCategoryChart.map((entry, index) => (
-                  <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
-                ))}
-              </Pie>
-              <Tooltip content={<ChartTooltip />} />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="min-h-0 flex-1">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <PieChart margin={{ top: 12, right: 12, left: 12, bottom: 12 }}>
+                  <Pie
+                    data={violationsByCategoryChart}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={55}
+                    outerRadius={90}
+                    paddingAngle={2}
+                  >
+                    {violationsByCategoryChart.map((entry, index) => (
+                      <Cell key={entry.name} fill={chartColors[index % chartColors.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<ChartTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <ChartLegend
+              items={violationsByCategoryChart.map((entry, index) => ({
+                label: entry.name,
+                color: entry.fill ?? chartColors[index % chartColors.length],
+              }))}
+            />
+          </div>
         </ChartCard>
       </div>
 
@@ -1005,33 +1045,50 @@ function ViolationCategoriesSection() {
         </ChartCard>
 
         <ChartCard title="Monthly Trend by Category" icon={LineChartIcon}>
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-            <ComposedChart data={categoryTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip content={<ChartTooltip />} />
-              <Legend />
-              {[
-                "Unsafe Driving",
-                "Hours-of-Service Compliance",
-                "Vehicle Maintenance",
-                "Crash Indicator",
-                "Controlled Substances and Alcohol",
-                "Documents / Registration",
-                "Other",
-              ].map((category, index) => (
-                <Bar
-                  key={category}
-                  dataKey={category}
-                  name={category}
-                  stackId="a"
-                  fill={chartColors[index % chartColors.length]}
-                  radius={index === 6 ? [8, 8, 0, 0] : 0}
-                />
-              ))}
-            </ComposedChart>
-          </ResponsiveContainer>
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="min-h-0 flex-1">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <ComposedChart data={categoryTrend} margin={{ top: 12, right: 12, left: 12, bottom: 12 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip content={<ChartTooltip />} />
+                  {[
+                    "Unsafe Driving",
+                    "Hours-of-Service Compliance",
+                    "Vehicle Maintenance",
+                    "Crash Indicator",
+                    "Controlled Substances and Alcohol",
+                    "Documents / Registration",
+                    "Other",
+                  ].map((category, index) => (
+                    <Bar
+                      key={category}
+                      dataKey={category}
+                      name={category}
+                      stackId="a"
+                      fill={chartColors[index % chartColors.length]}
+                      radius={index === 6 ? [8, 8, 0, 0] : 0}
+                    />
+                  ))}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+            <ChartLegend
+              items={[
+                { label: "Controlled Substances and Alcohol", color: "#ef4444" },
+                { label: "Crash Indicator", color: "#f59e0b" },
+                { label: "Documents / Registration", color: "#8b5cf6" },
+                { label: "Hours-of-Service Compliance", color: "#14b8a6" },
+                { label: "Other", color: "#84cc16" },
+                { label: "Unsafe Driving", color: "#0f766e" },
+                { label: "Vehicle Maintenance", color: "#2563eb" },
+              ].map((item) => ({
+                label: item.label,
+                color: item.color,
+              }))}
+            />
+          </div>
         </ChartCard>
       </div>
 
@@ -1316,4 +1373,3 @@ export function SafetyComplianceFinancialImpactView() {
 export function SafetyComplianceFleetCostsView() {
   return <FleetAndPlateCostsSection />;
 }
-
