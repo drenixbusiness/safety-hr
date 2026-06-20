@@ -122,97 +122,97 @@ function HeaderStats() {
   );
 }
 
-function FilterBar() {
-  const { filters, options, setFilter, resetFilters } = useSafetyCompliance();
-
-  return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
-            <Filter className="size-4" aria-hidden="true" />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-950">Filters</h2>
-            <p className="text-sm text-zinc-500">
-              Apply shared filters across all six subsections.
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={resetFilters}
-          className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 hover:text-zinc-950"
-        >
-          <RotateCcw className="size-4" aria-hidden="true" />
-          Reset
-        </button>
-      </div>
-
-      <div className="grid gap-3 xl:grid-cols-5">
-        <DateField
-          label="Date range start"
-          value={filters.startDate}
-          onChange={(value) => setFilter("startDate", value)}
-        />
-        <DateField
-          label="Date range end"
-          value={filters.endDate}
-          onChange={(value) => setFilter("endDate", value)}
-        />
-        <SelectField
-          label="Driver"
-          value={filters.driver}
-          onChange={(value) => setFilter("driver", value)}
-          options={options.drivers}
-        />
-        <SelectField
-          label="Status"
-          value={filters.status}
-          onChange={(value) => setFilter("status", value)}
-          options={options.statuses}
-        />
-        <SelectField
-          label="Inspection level"
-          value={filters.inspectionLevel}
-          onChange={(value) => setFilter("inspectionLevel", value)}
-          options={options.inspectionLevels}
-        />
-        <SelectField
-          label="Risk level"
-          value={filters.riskLevel}
-          onChange={(value) => setFilter("riskLevel", value)}
-          options={options.riskLevels}
-        />
-        <SelectField
-          label="Vehicle plate"
-          value={filters.vehiclePlate}
-          onChange={(value) => setFilter("vehiclePlate", value)}
-          options={options.vehiclePlates}
-        />
-        <SelectField
-          label="Unit"
-          value={filters.unit}
-          onChange={(value) => setFilter("unit", value)}
-          options={options.units}
-        />
-        <SelectField
-          label="Violation category"
-          value={filters.violationCategory}
-          onChange={(value) => setFilter("violationCategory", value)}
-          options={options.violationCategories}
-        />
-        <SelectField
-          label="Expense type"
-          value={filters.expenseType}
-          onChange={(value) => setFilter("expenseType", value)}
-          options={options.expenseTypes}
-        />
-      </div>
-    </section>
-  );
-}
+// function FilterBar() {
+//   const { filters, options, setFilter, resetFilters } = useSafetyCompliance();
+//
+//   return (
+//     <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+//       <div className="mb-4 flex items-center justify-between gap-3">
+//         <div className="flex items-center gap-2">
+//           <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+//             <Filter className="size-4" aria-hidden="true" />
+//           </div>
+//           <div>
+//             <h2 className="text-sm font-semibold text-zinc-950">Filters</h2>
+//             <p className="text-sm text-zinc-500">
+//               Apply shared filters across all six subsections.
+//             </p>
+//           </div>
+//         </div>
+//
+//         <button
+//           type="button"
+//           onClick={resetFilters}
+//           className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 hover:text-zinc-950"
+//         >
+//           <RotateCcw className="size-4" aria-hidden="true" />
+//           Reset
+//         </button>
+//       </div>
+//
+//       <div className="grid gap-3 xl:grid-cols-5">
+//         <DateField
+//           label="Date range start"
+//           value={filters.startDate}
+//           onChange={(value) => setFilter("startDate", value)}
+//         />
+//         <DateField
+//           label="Date range end"
+//           value={filters.endDate}
+//           onChange={(value) => setFilter("endDate", value)}
+//         />
+//         <SelectField
+//           label="Driver"
+//           value={filters.driver}
+//           onChange={(value) => setFilter("driver", value)}
+//           options={options.drivers}
+//         />
+//         <SelectField
+//           label="Status"
+//           value={filters.status}
+//           onChange={(value) => setFilter("status", value)}
+//           options={options.statuses}
+//         />
+//         <SelectField
+//           label="Inspection level"
+//           value={filters.inspectionLevel}
+//           onChange={(value) => setFilter("inspectionLevel", value)}
+//           options={options.inspectionLevels}
+//         />
+//         <SelectField
+//           label="Risk level"
+//           value={filters.riskLevel}
+//           onChange={(value) => setFilter("riskLevel", value)}
+//           options={options.riskLevels}
+//         />
+//         <SelectField
+//           label="Vehicle plate"
+//           value={filters.vehiclePlate}
+//           onChange={(value) => setFilter("vehiclePlate", value)}
+//           options={options.vehiclePlates}
+//         />
+//         <SelectField
+//           label="Unit"
+//           value={filters.unit}
+//           onChange={(value) => setFilter("unit", value)}
+//           options={options.units}
+//         />
+//         <SelectField
+//           label="Violation category"
+//           value={filters.violationCategory}
+//           onChange={(value) => setFilter("violationCategory", value)}
+//           options={options.violationCategories}
+//         />
+//         <SelectField
+//           label="Expense type"
+//           value={filters.expenseType}
+//           onChange={(value) => setFilter("expenseType", value)}
+//           options={options.expenseTypes}
+//         />
+//       </div>
+//     </section>
+//   );
+// }
 
 function SectionNav() {
   const pathname = usePathname();
@@ -288,7 +288,7 @@ export function SafetyComplianceRoot({
         </section>
 
         <SectionNav />
-        <FilterBar />
+        {/*<FilterBar />*/}
 
         <div className="space-y-6">{children}</div>
       </div>

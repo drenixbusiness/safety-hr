@@ -55,12 +55,10 @@ import {
   mostExpensiveItemName,
   topDriversByCharges,
   topInspectionsByPoints,
-  uniqueSortedMonths,
   type CategorySummary,
   type DriverSummary,
 } from "@/components/admin/safety-compliance/safety-compliance-analytics";
 import {
-  monthKey,
   type FleetCostRecord,
   type InspectionRecord,
   type RiskLevel,
