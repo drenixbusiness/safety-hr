@@ -1,5 +1,5 @@
-export type InspectionStatus = "Clean" | "OOS" | "Review" | "NO" | "YES";
-export type InspectionLevel = "DRIVER-ONLY" | "WALK-AROUND" | "FULL" | "Level I" | "Level II" | "Level III" | "Level V";
+export type InspectionStatus = "OOS"| "NO";
+export type InspectionLevel = "DRIVER-ONLY" | "WALK-AROUND" | "FULL";
 export type RiskLevel = "Low" | "Medium" | "High";
 export type ViolationCategory =
   | "Unsafe Driving"
@@ -16,6 +16,7 @@ export type InspectionRecord = {
   inspectionDate: string;
   fmcsaPostDate: string;
   inspectionLevel: InspectionLevel;
+  incomeAmount: number;
   oosViolations: number;
   driver: string;
   vin: string;
@@ -46,6 +47,7 @@ export type InspectionRecord = {
   totalPrice: number;
   expenseType: "Driver Charges" | "Company Expense" | "Fleet / Plate / Registration";
   violationCategory: ViolationCategory;
+  state?: string;
 };
 
 export type DriverChargeRecord = {
@@ -68,6 +70,7 @@ export type FleetCostRecord = {
   expenseType: "Renewal" | "Registration" | "Supplement" | "Plate" | "Fleet";
   driverName?: string;
   notes?: string;
+  supplement: number;
 };
 
 export const inspectionLevels = [
@@ -115,6 +118,9 @@ export function formatDate(value: string) {
 }
 
 export function monthKey(value: string) {
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 7);
+  }
   const dateValue = new Date(value);
   return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -124,6 +130,16 @@ export function monthLabelFromKey(value: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
   }).format(new Date(year, month - 1, 1));
+}
+export function normalizeName(value: string) {
+  return (value ?? "")
+      .replace(/\u00a0/g, " ")
+      .toUpperCase()
+      .replace(/[^A-Z ]/g, "")
+      .split(" ")
+      .filter((part) => part.length > 1)
+      .sort()
+      .join(" ");
 }
 
 export function riskLabelFromPoints(points: number): RiskLevel {

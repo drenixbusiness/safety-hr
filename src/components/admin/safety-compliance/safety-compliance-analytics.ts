@@ -3,13 +3,13 @@ import {
   formatDate,
   monthKey,
   monthLabelFromKey,
-  riskLabelFromPoints,
   type FleetCostRecord,
   type DriverChargeRecord,
   type InspectionRecord,
   type RiskLevel,
   type ViolationCategory,
   canonicalizeFinancialReason,
+  normalizeName
 } from "@/lib/safety-compliance-data";
 
 export type MonthlyPoint = {
@@ -82,21 +82,22 @@ export function uniqueSortedMonths(records: InspectionRecord[]) {
 }
 
 export function aggregateMonthlyInspectionData(records: InspectionRecord[]) {
-  const buckets = new Map<string, MonthlyBucket>();
+  const buckets = new Map<string, MonthlyBucket & { totalIncome: number }>();
   for (const record of records) {
-    if (record.inspectionDate > "2026-12-31") continue;
     const key = monthKey(record.inspectionDate);
     const bucket =
       buckets.get(key) ?? {
         key,
         totalPoints: 0,
         totalCharges: 0,
+        totalIncome: 0,
         inspectionCount: 0,
         oosCount: 0,
       };
     bucket.totalPoints += record.totalViolationPoints;
-    bucket.totalCharges += record.chargeAmount;
+    bucket.totalCharges += record.charges;
     bucket.inspectionCount += 1;
+    bucket.totalIncome += record.incomeAmount;
     bucket.oosCount += record.status === "OOS" ? 1 : 0;
     buckets.set(key, bucket);
   }
@@ -108,9 +109,27 @@ export function aggregateMonthlyInspectionData(records: InspectionRecord[]) {
       label: monthLabelFromKey(bucket.key),
       points: bucket.totalPoints,
       charges: bucket.totalCharges,
+      income: bucket.totalIncome,
       inspections: bucket.inspectionCount,
       oos: bucket.oosCount,
     }));
+}
+
+export function aggregateMonthlyDriverCharges(records: DriverChargeRecord[]) {
+  const buckets = new Map<string, number>();
+  for (const record of records) {
+    if (!record.inspectionDate) continue;
+    const key = monthKey(record.inspectionDate);
+    buckets.set(key, (buckets.get(key) ?? 0) + record.amount);
+  }
+
+  return Array.from(buckets.entries())
+      .sort((a, b) => monthSort(a[0], b[0]))
+      .map(([month, value]) => ({
+        month,
+        label: monthLabelFromKey(month),
+        outcome: value,
+      }));
 }
 
 function riskRank(level: RiskLevel) {
@@ -135,9 +154,11 @@ function maxRiskLevel(records: InspectionRecord[]): RiskLevel {
 export function aggregateDriverSummaries(records: InspectionRecord[]) {
   const grouped = new Map<string, InspectionRecord[]>();
   for (const record of records) {
-    const current = grouped.get(record.driver) ?? [];
+    const key = normalizeName(record.driver);
+    if (!key) continue;
+    const current = grouped.get(key) ?? [];
     current.push(record);
-    grouped.set(record.driver, current);
+    grouped.set(key, current);
   }
 
   const latestMonth = records
@@ -152,20 +173,25 @@ export function aggregateDriverSummaries(records: InspectionRecord[]) {
     : "";
 
   return Array.from(grouped.entries())
-    .map(([driver, driverRecords]) => {
+    .map(([_, driverRecords]) => {
+      const driver = driverRecords[0].driver;
       const totalViolationPoints = driverRecords.reduce(
         (sum, record) => sum + record.totalViolationPoints,
         0,
       );
       const totalCharges = driverRecords.reduce(
-        (sum, record) => sum + record.chargeAmount,
+        (sum, record) => sum + record.incomeAmount,
         0,
       );
       const oosViolations = driverRecords.reduce(
         (sum, record) => sum + record.oosViolations,
         0,
       );
-      const repeatViolations = Math.max(0, driverRecords.length - 1);
+      const realInspections = driverRecords.filter(
+          (r) => r.reportNo !== "NON-INSPECTION"
+      );
+      const repeatViolations = Math.max(0, realInspections.length - 1);
+
       const lastInspectionDate = driverRecords
         .map((record) => record.inspectionDate)
         .sort(monthSort)
@@ -191,6 +217,41 @@ export function aggregateDriverSummaries(records: InspectionRecord[]) {
       } satisfies DriverSummary;
     })
     .sort((a, b) => b.totalViolationPoints - a.totalViolationPoints);
+}
+
+export function aggregateFleetByUnitPrice(
+    records: FleetCostRecord[],
+    inspectionRecords: InspectionRecord[],
+) {
+  const vinToDriver = new Map<string, string>();
+  for (const inspection of inspectionRecords) {
+    if (inspection.vin && inspection.driver) {
+      vinToDriver.set(inspection.vin, inspection.driver);
+    }
+  }
+
+  const grouped = new Map<string, { value: number; driverName: string }>();
+
+  for (const record of records) {
+    const existing = grouped.get(record.unit) ?? {
+      value: 0,
+      driverName: record.driverName ?? vinToDriver.get(record.vin) ?? "",
+    };
+    existing.value += record.price;
+    if (!existing.driverName) {
+      existing.driverName = vinToDriver.get(record.vin) ?? "";
+    }
+    grouped.set(record.unit, existing);
+  }
+
+  return Array.from(grouped.entries())
+      .map(([name, data]) => ({
+        name,
+        value: data.value,
+        driverName: data.driverName,
+      }))
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value);
 }
 
 export function aggregateRiskLevels(records: InspectionRecord[]) {
@@ -288,7 +349,6 @@ export function aggregateFleetCosts(records: FleetCostRecord[]) {
 export function aggregateMonthlyFleetData(records: FleetCostRecord[]) {
   const buckets = new Map<string, number>();
   for (const record of records) {
-    if (record.recordDate > "2026-12-31") continue;
     const key = monthKey(record.recordDate);
     buckets.set(key, (buckets.get(key) ?? 0) + record.totalPrice);
   }
@@ -408,24 +468,98 @@ export function aggregateCompanyExpenseByType(records: InspectionRecord[]) {
     .sort((a, b) => b.value - a.value);
 }
 
-export function aggregateFleetByUnit(records: FleetCostRecord[]) {
+export function aggregateFleetByUnit(
+    records: FleetCostRecord[],
+    inspectionRecords: InspectionRecord[],
+) {
+  const vinToDriver = new Map<string, string>();
+  for (const inspection of inspectionRecords) {
+    if (inspection.vin && inspection.driver) {
+      vinToDriver.set(inspection.vin, inspection.driver);
+    }
+  }
+
+  const grouped = new Map<string, { value: number; driverName: string }>();
+
+  for (const record of records) {
+    const existing = grouped.get(record.unit) ?? {
+      value: 0,
+      driverName: record.driverName ?? vinToDriver.get(record.vin) ?? "",
+    };
+    existing.value += record.totalPrice;
+    if (!existing.driverName) {
+      existing.driverName = vinToDriver.get(record.vin) ?? "";
+    }
+    grouped.set(record.unit, existing);
+
+  }
+
+  return Array.from(grouped.entries())
+      .map(([name, data]) => ({
+        name,
+        value: data.value,
+        driverName: data.driverName,
+      }))
+      .sort((a, b) => b.value - a.value);
+}
+
+export function aggregateFleetByPlate(records: FleetCostRecord[]) {
+//   const vinToDriver = new Map<string, string>();
+//   for (const inspection of inspectionRecords) {
+//     if (inspection.vin && inspection.driver) {
+//       vinToDriver.set(inspection.vin, inspection.driver);
+//     }
+//   }
+//
+//   const grouped = new Map<string, { plate: string; driverName: string }>();
+//
+//   for (const record of records) {
+//     const existing = grouped.get(record.plate) ?? {
+//       plate: record.plate,
+//       driverName: record.driverName ?? vinToDriver.get(record.vin) ?? "",
+//     };
+//     if (!existing.driverName) {
+//       existing.driverName = vinToDriver.get(record.vin) ?? "";
+//     }
+//     grouped.set(record.plate, existing);
+//
+//   }
+//
+//   return Array.from(grouped.entries())
+//       .map(([name, data]) => ({
+//         name,
+//         plate: data.plate,
+//         driverName: data.driverName,
+//       }))
+// }
+
   const grouped = new Map<string, number>();
   for (const record of records) {
-    grouped.set(record.unit, (grouped.get(record.unit) ?? 0) + record.totalPrice);
+    grouped.set(record.plate, (grouped.get(record.plate) ?? 0) + record.price);
   }
   return Array.from(grouped.entries())
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
 }
 
-export function aggregateFleetByPlate(records: FleetCostRecord[]) {
-  const grouped = new Map<string, number>();
+export function aggregateTotalFleetByPlateAndSuppliment(records: FleetCostRecord[]) {
+  const grouped = new Map<string, { plate: string; totalPrice: number; totalSupplement: number }>();
+
   for (const record of records) {
-    grouped.set(record.plate, (grouped.get(record.plate) ?? 0) + record.totalPrice);
+    const existing = grouped.get(record.plate) ?? {
+      plate: record.plate,
+      totalPrice: 0,
+      totalSupplement: 0,
+    };
+
+    existing.totalPrice += record.price;
+    existing.totalSupplement += record.supplement;
+
+    grouped.set(record.plate, existing);
   }
-  return Array.from(grouped.entries())
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
+
+  return Array.from(grouped.values())
+      .sort((a, b) => b.totalPrice - a.totalPrice);
 }
 
 export function aggregateFleetByExpenseType(records: FleetCostRecord[]) {
@@ -443,7 +577,7 @@ export function aggregateFleetCostByYear(records: FleetCostRecord[]) {
 
   for (const record of records) {
     const yearNum = Number(record.year);
-    if (yearNum === 0 || yearNum > 2026) continue;
+    if (yearNum === 0) continue;
     const year = String(record.year);
     grouped.set(year, (grouped.get(year) ?? 0) + record.totalPrice);
   }

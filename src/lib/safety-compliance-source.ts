@@ -6,6 +6,7 @@ import {
   type FleetCostRecord,
   type InspectionRecord,
   riskLabelFromPoints,
+  normalizeName,
   type RiskLevel,
 } from "@/lib/safety-compliance-data";
 
@@ -96,32 +97,32 @@ function parseInteger(value: string | undefined) {
   return Number.isFinite(numeric) ? Math.trunc(numeric) : 0;
 }
 
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
 function parseDate(value: string | undefined) {
   const cleaned = clean(value);
   if (!cleaned) return "";
 
-  const maybe = new Date(cleaned);
-  if (!Number.isNaN(maybe.getTime())) {
-    return maybe.toISOString().slice(0, 10);
+
+  const iso = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    return `${y}-${pad2(Number(m))}-${pad2(Number(d))}`;
   }
 
-  const [month, day, year] = cleaned.split(/[/-]/).map((part) => Number(part));
-  if (month && day && year) {
-    return new Date(year, month - 1, day).toISOString().slice(0, 10);
+  const parts = cleaned.split(/[/-]/).map((part) => Number(part));
+  if (parts.length === 3) {
+    const [month, day, year] = parts;
+    if (month && day && year) {
+      return `${year}-${pad2(month)}-${pad2(day)}`;
+    }
   }
 
   return "";
 }
 
-function normalizeName(value: string) {
-  return clean(value)
-    .toUpperCase()
-    .replace(/[^A-Z ]/g, "")
-    .split(" ")
-    .filter((part) => part.length > 1)
-    .sort()
-    .join(" ");
-}
 
 function matchesDateOrName(
   inspectionDate: string,
@@ -166,6 +167,8 @@ function loadInspectionRecords(
 ) {
   return rows.map((row) => {
     const reportNo = clean(row[1]);
+    const stateMatch = reportNo.match(/^([A-Z]{2})-/);
+    const state = stateMatch ? stateMatch[1] : undefined;
     const inspectionDate = parseDate(row[2]);
     const driverRaw = clean(row[6]);
     const driverNormalized = normalizeName(driverRaw);
@@ -206,7 +209,7 @@ function loadInspectionRecords(
 
     // If still no reason but we have points or OOS violations
     if (detectedReasons.size === 0) {
-      const points = parseInteger(row[10]);
+      const points = parseInteger(row[9]);
       const oos = parseInteger(row[5]);
       if (oos > 0 || points > 0) {
         detectedReasons.add("Citation");
@@ -281,6 +284,7 @@ function loadInspectionRecords(
       vehiclePlate: clean(row[8]),
       points,
       charges: chargeAmount,
+      incomeAmount: parseAmount(row[11]),
       totalViolationPoints,
       chargeAmount,
       violationReason: finalReason,
@@ -305,6 +309,7 @@ function loadInspectionRecords(
       totalPrice: chargeAmount,
       expenseType: companyExpenseImpact > 0 ? "Company Expense" : "Driver Charges",
       violationCategory,
+      state,
     } satisfies InspectionRecord;
   });
 }
@@ -355,16 +360,13 @@ function loadFleetCostRecords(rows: CsvRow[]) {
     const make = clean(row[4]);
     const plate = clean(row[5]);
     const price = parseAmount(row[6]);
-    const totalPrice = parseAmount(row[8] || row[7] || row[6]);
+    const supplement = parseAmount(row[7]);
+    const totalPrice = parseAmount(row[8]);
 
-    // Skip headers or empty rows within sections
-    // Also skip if year is clearly wrong (like the 518 from child support)
-    if (!vin || (!unit && !plate && !price && !totalPrice) || vehicleYear < 1900 || vehicleYear > 2026) {
+    if (!vin || (!unit && !plate && !price && !totalPrice) || vehicleYear < 1900) {
       continue;
     }
 
-    // If it's a marker but has data (like the RENEWAL line), we don't continue, we process it.
-    // However, if it's just a header like "SUPPLEMENT,UNIT,VIN..." we should skip it.
     if (isMarker && (unit === "UNIT" || unit === "Unit")) {
       continue;
     }
@@ -377,6 +379,7 @@ function loadFleetCostRecords(rows: CsvRow[]) {
       make,
       plate,
       price,
+      supplement,
       totalPrice,
       expenseType: currentExpenseType,
       notes: currentExpenseType,
@@ -533,6 +536,7 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
       reportNo: "NON-INSPECTION",
       inspectionDate: dc.inspectionDate,
       fmcsaPostDate: dc.inspectionDate,
+      incomeAmount: 0,
       inspectionLevel: "DRIVER-ONLY",
       oosViolations: 0,
       driver: dc.driver,

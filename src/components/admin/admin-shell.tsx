@@ -132,19 +132,6 @@ export function AdminShell({ children }: AdminShellProps) {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              {/*<label className="relative block sm:w-80">*/}
-              {/*  <span className="sr-only">Search workspace</span>*/}
-              {/*  <Search*/}
-              {/*    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400"*/}
-              {/*    aria-hidden="true"*/}
-              {/*  />*/}
-              {/*  <input*/}
-              {/*    className="h-10 w-full rounded-lg border border-zinc-200 bg-zinc-50 pl-9 pr-3 text-sm outline-none transition placeholder:text-zinc-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-100"*/}
-              {/*    placeholder="Search records"*/}
-              {/*    type="search"*/}
-              {/*  />*/}
-              {/*</label>*/}
-
               <button
                 className="flex size-10 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-950"
                 type="button"
@@ -216,7 +203,7 @@ function Brand() {
       </div>
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
-          JDM
+          JM
         </p>
         <p className="text-base font-semibold text-zinc-950">Safety and HR</p>
       </div>
