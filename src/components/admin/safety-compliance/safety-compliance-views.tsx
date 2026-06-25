@@ -653,7 +653,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                 </div>
             </div>
 
-            <div className="w-full h-[400px]" >
+            <div className="w-full" style={{ height: 1000 }}>
                 <ComposableMap projection="geoAlbersUsa" style={{ width: "100%", height: "100%" }}>
                     <Geographies geography="https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json">
                         {({geographies}: { geographies: GeographyFeature[] }) =>
