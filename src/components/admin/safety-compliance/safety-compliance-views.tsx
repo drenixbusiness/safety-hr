@@ -589,10 +589,10 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
     const [tooltipPos, setTooltipPos] = useState({x: 0, y: 0});
 
     const getColor = (points: number) => {
-        if (points === 0) return "#dcfce7"; // Light Green (emerald-100) for zero points
-        if (points < 20) return "#10b981"; // Green
-        if (points < 60) return "#f59e0b"; // Yellow
-        return "#ef4444"; // Red
+        if (points === 0) return "#dcfce7";
+        if (points < 20) return "#10b981";
+        if (points < 60) return "#f59e0b";
+        return "#ef4444";
     };
 
     const stateData = useMemo(() => {
@@ -604,13 +604,12 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
             levels: Record<string, number>;
         }> = {};
 
-        // Fill with fake data for all states as requested
         Object.entries(STATE_NAMES).forEach(([abbr, name]) => {
             const seed = abbr.charCodeAt(0) + abbr.charCodeAt(1);
             const fakeInspections = (seed % 15) + 5;
             const fakeViolations = seed % 4;
             const fakePoints = (seed % 80);
-            
+
             data[abbr] = {
                 name: name,
                 inspections: fakeInspections,
@@ -624,15 +623,14 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
             };
         });
 
-        // Overlay with real data
         inspections.forEach(record => {
             if (!record.state || !data[record.state]) return;
-            
+
             const s = data[record.state];
             s.inspections += 1;
             s.violations += record.oosViolations;
             s.points += record.points;
-            
+
             if (record.inspectionLevel) {
                 const level = record.inspectionLevel.toString();
                 s.levels[level] = (s.levels[level] || 0) + 1;
@@ -655,16 +653,16 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                 </div>
             </div>
 
-            <div className="h-100 w-full">
-                <ComposableMap projection="geoAlbersUsa">
+            <div className="w-full h-[400px]" >
+                <ComposableMap projection="geoAlbersUsa" style={{ width: "100%", height: "100%" }}>
                     <Geographies geography="https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json">
                         {({geographies}: { geographies: GeographyFeature[] }) =>
                             geographies
                                 .filter(geo => geo.properties.name !== "Alaska" && geo.properties.name !== "Hawaii")
                                 .map((geo) => {
-                                    const stateAbbr = geo.properties.name === "District of Columbia" ? "DC" : 
+                                    const stateAbbr = geo.properties.name === "District of Columbia" ? "DC" :
                                         Object.keys(STATE_NAMES).find(key => STATE_NAMES[key] === geo.properties.name);
-                                    
+
                                     const data = stateAbbr ? stateData[stateAbbr] : null;
                                     const points = data?.points ?? 0;
                                     const isHovered = hoveredState === geo.id;
@@ -711,7 +709,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                                                             y={isSmallState ? 4 : -6}
                                                             style={{
                                                                 fontFamily: "system-ui",
-                                                                fill: points > 60 || isHovered ? "#fff" : "#1e293b",
+                                                                fill: points > 60 ? "#fff" : "#1e293b",
                                                                 fontSize: isSmallState ? "7px" : "10px",
                                                                 fontWeight: "bold",
                                                             }}
@@ -725,7 +723,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                                                                     y={4}
                                                                     style={{
                                                                         fontFamily: "system-ui",
-                                                                        fill: points > 60 || isHovered ? "rgba(255,255,255,0.9)" : "#475569",
+                                                                        fill: points > 60 ? "rgba(255,255,255,0.9)" : "#475569",
                                                                         fontSize: "6px",
                                                                         fontWeight: "500",
                                                                     }}
@@ -737,7 +735,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                                                                     y={12}
                                                                     style={{
                                                                         fontFamily: "system-ui",
-                                                                        fill: points > 60 || isHovered ? "rgba(255,255,255,0.9)" : "#475569",
+                                                                        fill: points > 60 ? "rgba(255,255,255,0.9)" : "#475569",
                                                                         fontSize: "6px",
                                                                         fontWeight: "500",
                                                                     }}
@@ -768,9 +766,10 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                             left: tooltipPos.x + (tooltipPos.x > (typeof window !== 'undefined' ? window.innerWidth * 0.6 : 800) ? -280 : 20),
                             top: tooltipPos.y + 20,
                             pointerEvents: "none",
-                            zIndex: 9999
+                            zIndex: 9999,
+                            minWidth: 240,
                         }}
-                        className="min-w-60 bg-white border border-zinc-200 shadow-2xl rounded-xl overflow-hidden"
+                        className="bg-white border border-zinc-200 shadow-2xl rounded-xl overflow-hidden"
                     >
                         <div className="bg-zinc-50 px-4 py-3 border-b border-zinc-200">
                             <h4 className="text-zinc-900 font-bold text-xl leading-tight">
@@ -778,7 +777,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                             </h4>
                             <p className="text-zinc-500 text-xs font-medium uppercase tracking-widest mt-0.5">State Report</p>
                         </div>
-                        
+
                         <div className="p-4 space-y-3">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -795,7 +794,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                                 <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-tight mb-1">Violation Points</p>
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 h-2 bg-zinc-100 rounded-full overflow-hidden">
-                                        <div 
+                                        <div
                                             className={`h-full rounded-full ${tooltipContent.points > 60 ? 'bg-rose-500' : tooltipContent.points > 20 ? 'bg-amber-500' : 'bg-emerald-500'}`}
                                             style={{ width: `${Math.min(100, (tooltipContent.points / 100) * 100)}%` }}
                                         />
@@ -805,7 +804,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                                     </span>
                                 </div>
                             </div>
-                            
+
                             <div className="pt-2 border-t border-zinc-100">
                                 <p className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest mb-2">Inspection Breakdown</p>
                                 <div className="grid grid-cols-3 gap-2">
