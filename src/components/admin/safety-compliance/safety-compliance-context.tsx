@@ -58,6 +58,15 @@ type SafetyComplianceContextValue = {
 
 const Context = createContext<SafetyComplianceContextValue | null>(null);
 
+type ViolationCategoryMonthSelectionValue = {
+  selectedMonths: string[];
+  setSelectedMonths: (months: string[]) => void;
+  availableMonths: string[];
+};
+
+const ViolationCategoryMonthSelectionContext =
+  createContext<ViolationCategoryMonthSelectionValue | null>(null);
+
 function withinRange(value: string, start: string, end: string) {
   if (!start || !end) return true;
   return value >= start && value <= end;
@@ -135,6 +144,41 @@ export const safetyComplianceSectionNav = [
     href: "/safety-compliance/fleet-plate-costs",
   },
 ] as const;
+
+export function ViolationCategoryMonthSelectionProvider({
+  children,
+  availableMonths,
+}: {
+  children: ReactNode;
+  availableMonths: string[];
+}) {
+  const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
+
+  const value = useMemo(
+    () => ({
+      selectedMonths,
+      setSelectedMonths,
+      availableMonths,
+    }),
+    [availableMonths, selectedMonths],
+  );
+
+  return (
+    <ViolationCategoryMonthSelectionContext.Provider value={value}>
+      {children}
+    </ViolationCategoryMonthSelectionContext.Provider>
+  );
+}
+
+export function useViolationCategoryMonthSelection() {
+  const value = useContext(ViolationCategoryMonthSelectionContext);
+  if (!value) {
+    throw new Error(
+      "useViolationCategoryMonthSelection must be used within ViolationCategoryMonthSelectionProvider",
+    );
+  }
+  return value;
+}
 
 export function SafetyComplianceProvider({
   children,

@@ -75,6 +75,7 @@ type AdminShellProps = {
 export function AdminShell({ children }: AdminShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const isSafetyCompliance = pathname.startsWith("/safety-compliance");
   const currentPage =
     navItems.find((item) =>
       item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
@@ -111,45 +112,44 @@ export function AdminShell({ children }: AdminShellProps) {
 
       <div className="flex h-full min-h-0 flex-col lg:pl-72">
         <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/95 backdrop-blur">
-          <div className="flex min-h-16 flex-col gap-4 px-4 py-3 sm:px-6 xl:flex-row xl:items-center xl:justify-between xl:px-8">
-            <div className="flex items-center gap-3">
-              <button
-                aria-label="Open navigation"
-                className="flex size-10 items-center justify-center rounded-lg border border-zinc-200 text-zinc-700 lg:hidden"
-                onClick={() => setMobileNavOpen(true)}
-                type="button"
-              >
-                <Menu className="size-5" aria-hidden="true" />
-              </button>
-              <div>
-                <p className="text-sm font-medium text-zinc-500">
-                  Admin workspace
-                </p>
-                <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">
-                  {currentPage.label}
-                </h1>
-              </div>
-            </div>
+          <div className="flex min-h-16 items-center gap-3 px-4 py-3 sm:px-6 xl:px-8">
+            <button
+              aria-label="Open navigation"
+              className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-700 lg:hidden"
+              onClick={() => setMobileNavOpen(true)}
+              type="button"
+            >
+              <Menu className="size-5" aria-hidden="true" />
+            </button>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <button
-                className="flex size-10 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-950"
-                type="button"
-                aria-label="View notifications"
-                title="Notifications"
-              >
-                <Bell className="size-5" aria-hidden="true" />
-              </button>
-
-              <div className="flex h-10 items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3">
-                <div className="flex size-7 items-center justify-center rounded-full bg-zinc-900 text-xs font-semibold text-white">
-                  AD
+            {isSafetyCompliance ? (
+              <div id="sc-header-slot" className="flex min-w-0 flex-1 flex-wrap items-center gap-3" />
+            ) : (
+              <>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-zinc-500">Admin workspace</p>
+                  <h1 className="text-2xl font-semibold tracking-tight text-zinc-950">
+                    {currentPage.label}
+                  </h1>
                 </div>
-                <span className="text-sm font-medium text-zinc-700">
-                  Admin
-                </span>
-              </div>
-            </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <button
+                    className="flex size-10 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 hover:text-zinc-950"
+                    type="button"
+                    aria-label="View notifications"
+                    title="Notifications"
+                  >
+                    <Bell className="size-5" aria-hidden="true" />
+                  </button>
+                  <div className="flex h-10 items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3">
+                    <div className="flex size-7 items-center justify-center rounded-full bg-zinc-900 text-xs font-semibold text-white">
+                      AD
+                    </div>
+                    <span className="text-sm font-medium text-zinc-700">Admin</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </header>
 

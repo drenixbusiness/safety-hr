@@ -12,7 +12,6 @@ import {
     LineChart as LineChartIcon,
     Search,
     ShieldAlert,
-    RotateCcw,
     Truck,
 } from "lucide-react";
 import {
@@ -41,7 +40,10 @@ import {
 } from "react-simple-maps";
 import { geoCentroid, GeoGeometryObjects } from "d3-geo";
 import { motion, AnimatePresence } from "framer-motion";
-import {useSafetyCompliance} from "@/components/admin/safety-compliance/safety-compliance-context";
+import {
+    useSafetyCompliance,
+    useViolationCategoryMonthSelection,
+} from "@/components/admin/safety-compliance/safety-compliance-context";
 import {
     aggregateCategories,
     aggregateChargesByCategory,
@@ -74,6 +76,7 @@ import {
     type InspectionRecord,
     type RiskLevel,
     monthKey,
+    monthLabelFromKey,
     canonicalizeFinancialReason,
 } from "@/lib/safety-compliance-data";
 
@@ -923,146 +926,6 @@ function PageSection({
     );
 }
 
-const MONTH_OPTIONS = [
-    { value: "1", label: "January" },
-    { value: "2", label: "February" },
-    { value: "3", label: "March" },
-    { value: "4", label: "April" },
-    { value: "5", label: "May" },
-    { value: "6", label: "June" },
-    { value: "7", label: "July" },
-    { value: "8", label: "August" },
-    { value: "9", label: "September" },
-    { value: "10", label: "October" },
-    { value: "11", label: "November" },
-    { value: "12", label: "December" },
-] as const;
-
-function buildYearOptions(minDate: string, maxDate: string) {
-    const minYear = Number(minDate.slice(0, 4));
-    const maxYear = Number(maxDate.slice(0, 4));
-    if (!Number.isFinite(minYear) || !Number.isFinite(maxYear) || minYear === 0 || maxYear === 0) {
-        return [];
-    }
-
-    const years: number[] = [];
-    for (let year = minYear; year <= maxYear; year += 1) {
-        years.push(year);
-    }
-    return years;
-}
-
-type PeriodSelectorProps = {
-    compact?: boolean;
-    month: string;
-    year: string;
-    years: number[];
-    onMonthChange: (month: string) => void;
-    onYearChange: (year: string) => void;
-    onReset: () => void;
-};
-
-function PeriodSelector({
-    compact = false,
-    month,
-    year,
-    years,
-    onMonthChange,
-    onYearChange,
-    onReset,
-}: PeriodSelectorProps) {
-
-    if (compact) {
-        return (
-            <div className="flex flex-wrap items-center gap-2">
-                <label className="flex items-center gap-1">
-                    <span className="text-[11px] uppercase tracking-wide text-zinc-500">Month</span>
-                    <select
-                        className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
-                        value={month}
-                        onChange={(event) => onMonthChange(event.target.value)}
-                    >
-                        <option value="">All</option>
-                        {MONTH_OPTIONS.map((month) => (
-                            <option key={month.value} value={month.value}>
-                                {month.label}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-                <label className="flex items-center gap-1">
-                    <span className="text-[11px] uppercase tracking-wide text-zinc-500">Year</span>
-                    <select
-                        className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
-                        value={year}
-                        onChange={(event) => onYearChange(event.target.value)}
-                    >
-                        <option value="">All</option>
-                        {years.map((year) => (
-                            <option key={year} value={String(year)}>
-                                {year}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-                <button
-                    type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition hover:bg-zinc-50"
-                    onClick={onReset}
-                    title="Reset period"
-                    aria-label="Reset period"
-                >
-                    <RotateCcw className="size-3.5" aria-hidden="true" />
-                </button>
-            </div>
-        );
-    }
-
-    return (
-        <div className="flex flex-wrap items-end gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2">
-            <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-zinc-500">Month</p>
-                <select
-                    className="h-9 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
-                    value={month}
-                    onChange={(event) => onMonthChange(event.target.value)}
-                >
-                    <option value="">All</option>
-                    {MONTH_OPTIONS.map((month) => (
-                        <option key={month.value} value={month.value}>
-                            {month.label}
-                        </option>
-                    ))}
-                </select>
-            </div>
-            <div className="space-y-1">
-                <p className="text-xs uppercase tracking-wide text-zinc-500">Year</p>
-                <select
-                    className="h-9 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
-                    value={year}
-                    onChange={(event) => onYearChange(event.target.value)}
-                >
-                    <option value="">All</option>
-                    {years.map((year) => (
-                        <option key={year} value={String(year)}>
-                            {year}
-                        </option>
-                    ))}
-                </select>
-            </div>
-            <button
-                type="button"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition hover:bg-zinc-50"
-                onClick={onReset}
-                title="Reset period"
-                aria-label="Reset period"
-            >
-                <RotateCcw className="size-4" aria-hidden="true" />
-            </button>
-        </div>
-    );
-}
-
 function useAnalytics() {
     const {
         filteredInspections: rawInspections,
@@ -1750,10 +1613,35 @@ function DriverScorecardSection() {
     );
 }
 
+const VIOLATION_CATEGORY_ORDER = [
+    "DRIVER FITNESS",
+    "HOS",
+    "INSURANCE AND OTHER",
+    "UNSAFE DRIVING",
+    "VEHICLE MAINTENANCE",
+] as const;
+
+function pointsForCategory(
+    record: InspectionRecord,
+    category: (typeof VIOLATION_CATEGORY_ORDER)[number],
+) {
+    switch (category) {
+        case "DRIVER FITNESS":
+            return record.driverFitnessPoints;
+        case "HOS":
+            return record.hosPoints;
+        case "INSURANCE AND OTHER":
+            return record.insuranceAndOtherPoints;
+        case "UNSAFE DRIVING":
+            return record.unsafeDrivingPoints;
+        case "VEHICLE MAINTENANCE":
+            return record.vehicleMaintenancePoints;
+    }
+}
+
 function ViolationCategoriesSection() {
-    const analytics = useAnalytics();
-    const { filteredInspections, filteredDriverCharges, dateBounds } = useSafetyCompliance();
-    const [driverPeriod, setDriverPeriod] = useState({ month: "", year: "" });
+    const { filteredInspections, filteredDriverCharges } = useSafetyCompliance();
+    const { selectedMonths, availableMonths } = useViolationCategoryMonthSelection();
 
     const formatMoney = (value: number) =>
         new Intl.NumberFormat("en-US", {
@@ -1762,11 +1650,35 @@ function ViolationCategoriesSection() {
             minimumFractionDigits: 2,
         }).format(value);
 
-    const categorySummaries = analytics.categorySummaries;
+    const activeMonths = useMemo(
+        () =>
+            (selectedMonths.length ? selectedMonths : availableMonths).filter(Boolean),
+        [availableMonths, selectedMonths],
+    );
 
-    const categoryTrendData = useMemo(() => buildMonthlyCategoryTrend(analytics.filteredInspections), [analytics.filteredInspections]);
+    const periodInspections = useMemo(() => {
+        if (!selectedMonths.length) return filteredInspections;
+        const selected = new Set(selectedMonths);
+        return filteredInspections.filter((record) => selected.has(monthKey(record.inspectionDate)));
+    }, [filteredInspections, selectedMonths]);
 
-    const complianceRows: ComplianceRow[] = analytics.filteredInspections
+    const periodDriverCharges = useMemo(() => {
+        if (!selectedMonths.length) return filteredDriverCharges;
+        const selected = new Set(selectedMonths);
+        return filteredDriverCharges.filter((record) => selected.has(monthKey(record.inspectionDate)));
+    }, [filteredDriverCharges, selectedMonths]);
+
+    const categorySummaries = useMemo(
+        () => aggregateCategories(periodInspections),
+        [periodInspections],
+    );
+
+    const categoryTrendData = useMemo(
+        () => buildMonthlyCategoryTrend(periodInspections),
+        [periodInspections],
+    );
+
+    const complianceRows: ComplianceRow[] = periodInspections
         .filter((row) => row.reportNo !== "NON-INSPECTION")
         .filter(
             (row) =>
@@ -1787,7 +1699,7 @@ function ViolationCategoriesSection() {
             alcohol: row.alcoholSubstanceReason,
         }));
 
-    const totalDriverCharges = filteredDriverCharges.reduce(
+    const totalDriverCharges = periodDriverCharges.reduce(
         (sum, row) => sum + row.amount,
         0,
     );
@@ -1795,7 +1707,7 @@ function ViolationCategoriesSection() {
     const topCategory = categorySummaries[0]?.category ?? "N/A";
 
     const chargesByReason = Array.from(
-        filteredDriverCharges.reduce<Map<string, number>>((map, row) => {
+        periodDriverCharges.reduce<Map<string, number>>((map, row) => {
             const key = canonicalizeFinancialReason(row.reason);
             map.set(key, (map.get(key) ?? 0) + row.amount);
             return map;
@@ -1804,9 +1716,8 @@ function ViolationCategoriesSection() {
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value);
 
-
     const countByReason = Array.from(
-        filteredDriverCharges.reduce<Map<string, number>>((map, row) => {
+        periodDriverCharges.reduce<Map<string, number>>((map, row) => {
             const key = canonicalizeFinancialReason(row.reason);
             map.set(key, (map.get(key) ?? 0) + 1);
             return map;
@@ -1815,31 +1726,34 @@ function ViolationCategoriesSection() {
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value);
 
-    const years = useMemo(
-        () => buildYearOptions(dateBounds.minDate, dateBounds.maxDate),
-        [dateBounds.maxDate, dateBounds.minDate],
-    );
-
-    const driverChartRows = useMemo(() => {
-        if (!driverPeriod.month || !driverPeriod.year) {
-            return filteredInspections;
-        }
-
-        const month = driverPeriod.month.padStart(2, "0");
-        const key = `${driverPeriod.year}-${month}`;
-        return filteredInspections.filter((record) => monthKey(record.inspectionDate) === key);
-    }, [driverPeriod.month, driverPeriod.year, filteredInspections]);
-
     const pointsByCategoryData = useMemo(
-        () => aggregatePointsByCategory(filteredInspections),
-        [filteredInspections],
+        () => aggregatePointsByCategory(periodInspections),
+        [periodInspections],
     );
     const totalCategoryPoints = pointsByCategoryData.reduce((sum, row) => sum + row.points, 0);
     const pointsByDriverData = useMemo(
-        () => aggregateDriverPointsByCategory(driverChartRows),
-        [driverChartRows],
+        () => aggregateDriverPointsByCategory(periodInspections),
+        [periodInspections],
     );
-    const driverCategoryChartHeight = Math.max(320, pointsByDriverData.length * 28 + 96);
+    const driverCategoryChartHeight = Math.max(320, pointsByDriverData.length * 28 + 104);
+
+    const matrixMonthColumns = activeMonths;
+    const matrixRows = useMemo(
+        () =>
+            VIOLATION_CATEGORY_ORDER.map((category) => ({
+                category,
+                values: matrixMonthColumns.map((month) =>
+                    periodInspections
+                        .filter(
+                            (record) =>
+                                monthKey(record.inspectionDate) === month &&
+                                record.violationCategory === category,
+                        )
+                        .reduce((sum, record) => sum + pointsForCategory(record, category), 0),
+                ),
+            })),
+        [matrixMonthColumns, periodInspections],
+    );
 
     const CATEGORY_COLORS: Record<string, string> = {
         "UNSAFE DRIVING": "#ef4444",
@@ -1850,10 +1764,7 @@ function ViolationCategoriesSection() {
     };
 
     return (
-        <PageSection
-            title="Violation Categories"
-            description="Per-driver compliance breakdown and driver charges in one place."
-        >
+        <section className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <MetricCard label="Compliance Violations" value={String(complianceRows.length)} icon={ShieldAlert} tone="negative" />
                 <MetricCard label="Drivers Involved" value={String(driversInvolved)} icon={Truck} />
@@ -1862,6 +1773,56 @@ function ViolationCategoriesSection() {
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
+                <ChartCard title="Violation Points Matrix" icon={BarChart3} contentClassName="h-auto">
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full border-separate border-spacing-0">
+                            <thead>
+                            <tr>
+                                <th className="sticky left-0 z-10 border-b border-zinc-200 bg-white px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                    Category
+                                </th>
+                                {matrixMonthColumns.map((month) => (
+                                    <th
+                                        key={month}
+                                        className="border-b border-zinc-200 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-zinc-500"
+                                    >
+                                        {monthLabelFromKey(month)}
+                                    </th>
+                                ))}
+                            </tr>
+                            </thead>
+                            <tbody>
+                            {matrixRows.map((row) => (
+                                <tr key={row.category} className="hover:bg-zinc-50/60">
+                                    <th className="sticky left-0 z-10 border-b border-zinc-100 bg-white px-3 py-3 text-left text-sm font-semibold text-zinc-950">
+                                        {row.category}
+                                    </th>
+                                    {row.values.map((value, index) => (
+                                        <td
+                                            key={`${row.category}-${matrixMonthColumns[index]}`}
+                                            className={`border-b border-zinc-100 px-3 py-3 text-center text-sm font-medium ${value > 0 ? "text-zinc-950" : "text-zinc-400"}`}
+                                        >
+                                            {value.toLocaleString("en-US")}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </ChartCard>
+
+                <ChartCard title="Charge Amount by Reason" icon={DollarSign}>
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                        <BarChart data={chargesByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                            <XAxis type="number" tick={{ fontSize: 11 }} />
+                            <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
+                            <Tooltip content={<ChartTooltip />} />
+                            <Bar dataKey="value" name="Total Charges" fill="#ef4444" radius={[0, 8, 8, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </ChartCard>
                 <ChartCard title="Violations Trend by Category Points" icon={ShieldAlert}>
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                         <LineChart data={categoryTrendData}>
@@ -1879,29 +1840,7 @@ function ViolationCategoriesSection() {
                     </ResponsiveContainer>
                 </ChartCard>
 
-                <ChartCard title="Charge Amount by Reason" icon={DollarSign}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                        <BarChart data={chargesByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                            <XAxis type="number" tick={{ fontSize: 11 }} />
-                            <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
-                            <Tooltip content={<ChartTooltip />} />
-                            <Bar dataKey="value" name="Total Charges" fill="#ef4444" radius={[0, 8, 8, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </ChartCard>
 
-                <ChartCard title="Number of Charges by Reason" icon={CircleAlert}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                        <BarChart data={countByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                            <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
-                            <Tooltip content={<ChartTooltip />} />
-                            <Bar dataKey="value" name="Charge Count" fill="#f59e0b" radius={[0, 8, 8, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </ChartCard>
 
                 <ChartCard title="Points Distribution by Category" icon={ShieldAlert} contentClassName="h-80">
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -1938,6 +1877,17 @@ function ViolationCategoriesSection() {
                         </PieChart>
                     </ResponsiveContainer>
                 </ChartCard>
+                <ChartCard title="Number of Charges by Reason" icon={CircleAlert}>
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                        <BarChart data={countByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                            <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
+                            <Tooltip content={<ChartTooltip />} />
+                            <Bar dataKey="value" name="Charge Count" fill="#f59e0b" radius={[0, 8, 8, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </ChartCard>
             </div>
 
             <ChartCard
@@ -1945,21 +1895,6 @@ function ViolationCategoriesSection() {
                 icon={BarChart3}
                 dynamicHeight={driverCategoryChartHeight}
                 contentClassName="h-auto"
-                headerRight={
-                    <PeriodSelector
-                        compact
-                        month={driverPeriod.month}
-                        year={driverPeriod.year}
-                        years={years}
-                        onMonthChange={(month) =>
-                            setDriverPeriod((current) => ({ ...current, month }))
-                        }
-                        onYearChange={(year) =>
-                            setDriverPeriod((current) => ({ ...current, year }))
-                        }
-                        onReset={() => setDriverPeriod({ month: "", year: "" })}
-                    />
-                }
             >
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <BarChart
@@ -1985,6 +1920,7 @@ function ViolationCategoriesSection() {
                     </BarChart>
                 </ResponsiveContainer>
             </ChartCard>
+
 
             <DataTable<ComplianceRow>
                 title="Driver Compliance Breakdown"
@@ -2016,7 +1952,7 @@ function ViolationCategoriesSection() {
             />
 
 
-        </PageSection>
+        </section>
     );
 }
 
