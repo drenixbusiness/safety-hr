@@ -7,19 +7,9 @@ export default async function SafetyComplianceLayout({
 }: {
   children: ReactNode;
 }) {
+  let data: Awaited<ReturnType<typeof loadSafetyComplianceData>>;
   try {
-    const { inspectionRecords, driverChargeRecords, fleetCostRecords } =
-      await loadSafetyComplianceData();
-
-    return (
-      <SafetyComplianceRoot
-        inspectionRecords={inspectionRecords}
-        driverChargeRecords={driverChargeRecords}
-        fleetCostRecords={fleetCostRecords}
-      >
-        {children}
-      </SafetyComplianceRoot>
-    );
+    data = await loadSafetyComplianceData();
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to load Safety & Compliance data";
@@ -34,4 +24,15 @@ export default async function SafetyComplianceLayout({
       </div>
     );
   }
+
+  return (
+    <SafetyComplianceRoot
+      inspectionRecords={data.inspectionRecords}
+      driverChargeRecords={data.driverChargeRecords}
+      fleetCostRecords={data.fleetCostRecords}
+      inspectionSheetSummary={data.inspectionSheetSummary}
+    >
+      {children}
+    </SafetyComplianceRoot>
+  );
 }

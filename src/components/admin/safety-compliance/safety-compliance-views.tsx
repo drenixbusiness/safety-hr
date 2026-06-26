@@ -12,6 +12,7 @@ import {
     LineChart as LineChartIcon,
     Search,
     ShieldAlert,
+    RotateCcw,
     Truck,
 } from "lucide-react";
 import {
@@ -56,6 +57,8 @@ import {
     buildMonthlyCategoryTrend,
     aggregateRiskLevels,
     aggregateSafetyLossByCategory,
+    aggregatePointsByCategory,
+    aggregateDriverPointsByCategory,
     formatCurrency,
     formatDate,
     mostExpensiveItemName,
@@ -63,12 +66,15 @@ import {
     topInspectionsByPoints,
     type DriverSummary, aggregateMonthlyDriverCharges,
     aggregateFleetByUnitPrice,
+    aggregateDriverChargesByReason,
 } from "@/components/admin/safety-compliance/safety-compliance-analytics";
 import {
     DriverChargeRecord,
     type FleetCostRecord,
     type InspectionRecord,
     type RiskLevel,
+    monthKey,
+    canonicalizeFinancialReason,
 } from "@/lib/safety-compliance-data";
 
 type TableColumn<T> = {
@@ -96,7 +102,7 @@ function statusTone(status: InspectionRecord["status"]) {
     switch (status) {
         case "OOS":
             return "bg-rose-50 text-rose-700 border-rose-200";
-        case "NO":
+        case "Clean Inspection":
             return "bg-emerald-50 text-emerald-700 border-emerald-200";
     }
 }
@@ -122,14 +128,14 @@ function ComplianceCell({ reason }: { reason?: string }) {
                     : "border-emerald-200 bg-emerald-50 text-emerald-700 rounded-2xl"
             }`}
         >
-      {hasViolation ? reason : "No violation"}
+      {hasViolation ? reason : "Clean Inspection"}
     </span>
     );
 }
 
 function ChargeReasonBadge({ reason }: { reason: string }) {
-    const label = reason || "—";
-    const isViolation = !/no violation/i.test(label) && label !== "—";
+    const label = reason === "No violations" ? "Clean Inspection" : (reason || "—");
+    const isViolation = !/clean inspection/i.test(label) && label !== "—";
     return (
         <span
             className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
@@ -200,6 +206,7 @@ function ChartCard({
                        children,
                        className = "",
                        subtitle,
+                       headerRight,
                        contentClassName = "h-72",
                        dynamicHeight
                    }: {
@@ -208,6 +215,7 @@ function ChartCard({
     children: ReactNode;
     className?: string;
     subtitle?: string;
+    headerRight?: ReactNode;
     contentClassName?: string;
     dynamicHeight?: number;
 
@@ -219,8 +227,11 @@ function ChartCard({
                     <h4 className="text-sm font-semibold text-zinc-950">{title}</h4>
                     {subtitle ? <p className="text-sm text-zinc-500">{subtitle}</p> : null}
                 </div>
-                <div className="flex size-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600">
-                    <Icon className="size-4" aria-hidden="true"/>
+                <div className="flex items-center gap-2">
+                    {headerRight ? <div className="flex items-center">{headerRight}</div> : null}
+                    <div className="flex size-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600">
+                        <Icon className="size-4" aria-hidden="true"/>
+                    </div>
                 </div>
             </div>
             <div
@@ -228,36 +239,6 @@ function ChartCard({
                 style={dynamicHeight ? {height: dynamicHeight} : undefined}
             >{children}</div>
         </section>
-    );
-}
-
-function ChartLegend({
-                         items,
-                     }: {
-    items: Array<{ label: string; color: string }>;
-}) {
-    return (
-        <div
-            className="mx-auto flex w-fit max-w-170 flex-wrap items-center justify-center gap-3 px-2 pt-3 text-[14px] leading-none sm:text-[15px]">
-            {items.map((item) => (
-                <div
-                    key={item.label}
-                    className="inline-flex items-center gap-1.5 whitespace-nowrap font-normal"
-                    style={{color: item.color}}
-                >
-          <span
-              className="size-2.5 border-solid"
-              style={{
-                  backgroundColor: item.color,
-                  borderColor: item.color,
-                  borderWidth: "5px",
-                  marginRight: "10px",
-              }}
-          />
-                    <span className="leading-none">{item.label}</span>
-                </div>
-            ))}
-        </div>
     );
 }
 
@@ -604,37 +585,31 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
             levels: Record<string, number>;
         }> = {};
 
-        Object.entries(STATE_NAMES).forEach(([abbr, name]) => {
-            const seed = abbr.charCodeAt(0) + abbr.charCodeAt(1);
-            const fakeInspections = (seed % 15) + 5;
-            const fakeViolations = seed % 4;
-            const fakePoints = (seed % 80);
-
-            data[abbr] = {
-                name: name,
-                inspections: fakeInspections,
-                violations: fakeViolations,
-                points: fakePoints,
-                levels: {
-                    "1": Math.floor(fakeInspections * 0.2),
-                    "2": Math.floor(fakeInspections * 0.5),
-                    "3": Math.floor(fakeInspections * 0.3)
-                }
-            };
-        });
-
-        inspections.forEach(record => {
-            if (!record.state || !data[record.state]) return;
-
-            const s = data[record.state];
-            s.inspections += 1;
-            s.violations += record.oosViolations;
-            s.points += record.points;
-
-            if (record.inspectionLevel) {
-                const level = record.inspectionLevel.toString();
-                s.levels[level] = (s.levels[level] || 0) + 1;
+        const ensure = (abbr: string) => {
+            if (!data[abbr]) {
+                data[abbr] = {
+                    name: STATE_NAMES[abbr] ?? abbr,
+                    inspections: 0,
+                    violations: 0,
+                    points: 0,
+                    levels: { "1": 0, "2": 0, "3": 0 },
+                };
             }
+            return data[abbr];
+        };
+
+        inspections.forEach((record) => {
+            const abbr = record.state as string | undefined;
+            if (!abbr || !STATE_NAMES[abbr]) return;
+            const s = ensure(abbr);
+            s.inspections += 1;
+            s.violations += Number.isFinite(record.oosViolations) ? record.oosViolations : 0;
+            s.points += Number.isFinite(record.points) ? record.points : 0;
+
+            // Map inspection level to Level 1/2/3 buckets per spec
+            const lvl = (record.inspectionLevel || "").toString().toUpperCase();
+            const key = lvl === "FULL" ? "1" : lvl === "WALK-AROUND" ? "2" : lvl === "DRIVER-ONLY" ? "3" : undefined;
+            if (key) s.levels[key] = (s.levels[key] || 0) + 1;
         });
 
         return data;
@@ -648,8 +623,8 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
         <div className="relative mt-8 p-6 bg-white rounded-xl border border-zinc-200 shadow-sm overflow-hidden" onMouseMove={handleMouseMove}>
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h3 className="text-lg font-semibold text-zinc-900">Geographic Inspection Heatmap</h3>
-                    <p className="text-sm text-zinc-500">State risk levels based on total violation points</p>
+                    <h3 className="text-lg font-semibold text-zinc-900">USA Inspections Map</h3>
+                    <p className="text-sm text-zinc-500">Interactive map powered by live Google Sheet data</p>
                 </div>
             </div>
 
@@ -665,6 +640,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
 
                                     const data = stateAbbr ? stateData[stateAbbr] : null;
                                     const points = data?.points ?? 0;
+                                    const hasData = !!data;
                                     const isHovered = hoveredState === geo.id;
                                     const isSmallState = stateAbbr ? ['RI', 'DE', 'MD', 'DC', 'CT', 'MA', 'NJ', 'VT', 'NH'].includes(stateAbbr) : false;
 
@@ -692,7 +668,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                                         >
                                             <Geography
                                                 geography={geo}
-                                                fill={isHovered ? "#3b82f6" : getColor(points)}
+                                                fill={isHovered ? "#3b82f6" : (hasData ? getColor(points) : "#e5e7eb")}
                                                 stroke="#FFFFFF"
                                                 strokeWidth={isHovered ? 1.5 : 0.5}
                                                 style={{
@@ -781,17 +757,17 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                         <div className="p-4 space-y-3">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-tight">Inspections</p>
+                                    <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-tight">Inspections Total</p>
                                     <p className="text-zinc-900 text-xl font-semibold">{tooltipContent.inspections}</p>
                                 </div>
                                 <div>
-                                    <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-tight">Violations</p>
+                                    <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-tight">Violations Total</p>
                                     <p className="text-zinc-900 text-xl font-semibold">{tooltipContent.violations}</p>
                                 </div>
                             </div>
 
                             <div>
-                                <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-tight mb-1">Violation Points</p>
+                                <p className="text-zinc-500 text-[10px] uppercase font-bold tracking-tight mb-1">Points Total</p>
                                 <div className="flex items-center gap-2">
                                     <div className="flex-1 h-2 bg-zinc-100 rounded-full overflow-hidden">
                                         <div
@@ -806,18 +782,18 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
                             </div>
 
                             <div className="pt-2 border-t border-zinc-100">
-                                <p className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest mb-2">Inspection Breakdown</p>
+                                <p className="text-zinc-400 text-[10px] uppercase font-bold tracking-widest mb-2">Levels</p>
                                 <div className="grid grid-cols-3 gap-2">
                                     <div className="bg-zinc-50 p-2 rounded-lg text-center border border-zinc-200/50">
-                                        <p className="text-zinc-500 text-[10px] font-bold">Level 1</p>
+                                        <p className="text-zinc-500 text-[10px] font-bold">Level 1 - Full</p>
                                         <p className="text-zinc-900 font-bold text-base">{tooltipContent.levels["1"] || 0}</p>
                                     </div>
                                     <div className="bg-zinc-50 p-2 rounded-lg text-center border border-zinc-200/50">
-                                        <p className="text-zinc-500 text-[10px] font-bold">Level 2</p>
+                                        <p className="text-zinc-500 text-[10px] font-bold">Level 2 - Walk-around</p>
                                         <p className="text-zinc-900 font-bold text-base">{tooltipContent.levels["2"] || 0}</p>
                                     </div>
                                     <div className="bg-zinc-50 p-2 rounded-lg text-center border border-zinc-200/50">
-                                        <p className="text-zinc-500 text-[10px] font-bold">Level 3</p>
+                                        <p className="text-zinc-500 text-[10px] font-bold">Level 3 - Drivers-only</p>
                                         <p className="text-zinc-900 font-bold text-base">{tooltipContent.levels["3"] || 0}</p>
                                     </div>
                                 </div>
@@ -834,23 +810,19 @@ function StateAnalytics({inspections}: { inspections: InspectionRecord[] }) {
     const data = useMemo(() => {
         const stateStats: Record<string, { state: string, name: string, points: number, inspections: number, violations: number }> = {};
         
-        // Populate with fake data (same logic as map)
+        // Initialize with 0 for all states (except AK, HI)
         Object.entries(STATE_NAMES).forEach(([abbr, name]) => {
-            // Filter out Alaska and Hawaii to match map
             if (abbr === "AK" || abbr === "HI") return;
-
-            const seed = abbr.charCodeAt(0) + abbr.charCodeAt(1);
-            const fakeInspections = (seed % 15) + 5;
             stateStats[abbr] = {
                 state: abbr,
                 name: name,
-                inspections: fakeInspections,
-                violations: seed % 4,
-                points: seed % 80
+                inspections: 0,
+                violations: 0,
+                points: 0
             };
         });
 
-        // Overlay with real data
+        // Accumulate real data
         inspections.forEach(record => {
             if (!record.state || !stateStats[record.state]) return;
             stateStats[record.state].inspections += 1;
@@ -951,8 +923,153 @@ function PageSection({
     );
 }
 
+const MONTH_OPTIONS = [
+    { value: "1", label: "January" },
+    { value: "2", label: "February" },
+    { value: "3", label: "March" },
+    { value: "4", label: "April" },
+    { value: "5", label: "May" },
+    { value: "6", label: "June" },
+    { value: "7", label: "July" },
+    { value: "8", label: "August" },
+    { value: "9", label: "September" },
+    { value: "10", label: "October" },
+    { value: "11", label: "November" },
+    { value: "12", label: "December" },
+] as const;
+
+function buildYearOptions(minDate: string, maxDate: string) {
+    const minYear = Number(minDate.slice(0, 4));
+    const maxYear = Number(maxDate.slice(0, 4));
+    if (!Number.isFinite(minYear) || !Number.isFinite(maxYear) || minYear === 0 || maxYear === 0) {
+        return [];
+    }
+
+    const years: number[] = [];
+    for (let year = minYear; year <= maxYear; year += 1) {
+        years.push(year);
+    }
+    return years;
+}
+
+type PeriodSelectorProps = {
+    compact?: boolean;
+    month: string;
+    year: string;
+    years: number[];
+    onMonthChange: (month: string) => void;
+    onYearChange: (year: string) => void;
+    onReset: () => void;
+};
+
+function PeriodSelector({
+    compact = false,
+    month,
+    year,
+    years,
+    onMonthChange,
+    onYearChange,
+    onReset,
+}: PeriodSelectorProps) {
+
+    if (compact) {
+        return (
+            <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1">
+                    <span className="text-[11px] uppercase tracking-wide text-zinc-500">Month</span>
+                    <select
+                        className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
+                        value={month}
+                        onChange={(event) => onMonthChange(event.target.value)}
+                    >
+                        <option value="">All</option>
+                        {MONTH_OPTIONS.map((month) => (
+                            <option key={month.value} value={month.value}>
+                                {month.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <label className="flex items-center gap-1">
+                    <span className="text-[11px] uppercase tracking-wide text-zinc-500">Year</span>
+                    <select
+                        className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
+                        value={year}
+                        onChange={(event) => onYearChange(event.target.value)}
+                    >
+                        <option value="">All</option>
+                        {years.map((year) => (
+                            <option key={year} value={String(year)}>
+                                {year}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <button
+                    type="button"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition hover:bg-zinc-50"
+                    onClick={onReset}
+                    title="Reset period"
+                    aria-label="Reset period"
+                >
+                    <RotateCcw className="size-3.5" aria-hidden="true" />
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex flex-wrap items-end gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2">
+            <div className="space-y-1">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Month</p>
+                <select
+                    className="h-9 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
+                    value={month}
+                    onChange={(event) => onMonthChange(event.target.value)}
+                >
+                    <option value="">All</option>
+                    {MONTH_OPTIONS.map((month) => (
+                        <option key={month.value} value={month.value}>
+                            {month.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
+            <div className="space-y-1">
+                <p className="text-xs uppercase tracking-wide text-zinc-500">Year</p>
+                <select
+                    className="h-9 rounded-lg border border-zinc-200 bg-white px-2 text-sm text-zinc-950"
+                    value={year}
+                    onChange={(event) => onYearChange(event.target.value)}
+                >
+                    <option value="">All</option>
+                    {years.map((year) => (
+                        <option key={year} value={String(year)}>
+                            {year}
+                        </option>
+                    ))}
+                </select>
+            </div>
+            <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition hover:bg-zinc-50"
+                onClick={onReset}
+                title="Reset period"
+                aria-label="Reset period"
+            >
+                <RotateCcw className="size-4" aria-hidden="true" />
+            </button>
+        </div>
+    );
+}
+
 function useAnalytics() {
-    const {filteredInspections: rawInspections, filteredFleetCosts, filteredDriverCharges} = useSafetyCompliance();
+    const {
+        filteredInspections: rawInspections,
+        filteredFleetCosts,
+        filteredDriverCharges,
+        inspectionSheetSummary,
+    } = useSafetyCompliance();
     return useMemo(() => {
         const filteredInspections = rawInspections.filter(
             (r) => r.reportNo !== "NON-INSPECTION",
@@ -1023,8 +1140,8 @@ function useAnalytics() {
             (sum, record) => sum + record.incomeAmount,
             0,
         );
-        const totalCompanyExpense = filteredFleetCosts.reduce(
-            (sum, record) => sum + record.totalPrice,
+        const totalCompanyExpense = filteredDriverCharges.reduce(
+            (sum, r) => sum + r.amount,
             0,
         );
         const highRiskDrivers = driverSummaries.filter(
@@ -1123,6 +1240,7 @@ function useAnalytics() {
             topDriverCharges: topDriversByCharges(filteredInspections),
             filteredInspections,
             filteredFleetCosts,
+            inspectionSheetSummary,
             totalSumAndSup,
             totalOutcome,
             monthlyDriverCharges,
@@ -1138,13 +1256,7 @@ function useAnalytics() {
                     return map;
                 }, new Map()),
             ).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
-            outcomeByReason: Array.from(
-                filteredDriverCharges.reduce<Map<string, number>>((map, r) => {
-                    const key = r.reason || "Unknown";
-                    map.set(key, (map.get(key) ?? 0) + r.amount);
-                    return map;
-                }, new Map()),
-            ).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
+            outcomeByReason: aggregateDriverChargesByReason(filteredDriverCharges),
             outcomeByDriver: Array.from(
                 filteredDriverCharges.reduce<Map<string, number>>((map, r) => {
                     map.set(r.driver, (map.get(r.driver) ?? 0) + r.amount);
@@ -1152,7 +1264,7 @@ function useAnalytics() {
                 }, new Map()),
             ).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
         };
-    }, [filteredDriverCharges, filteredFleetCosts, rawInspections]);
+    }, [filteredDriverCharges, filteredFleetCosts, inspectionSheetSummary, rawInspections]);
 }
 
 function DashboardSection() {
@@ -1235,7 +1347,7 @@ function DashboardSection() {
                 </ChartCard>
             </div>
             <DataTable<InspectionRecord>
-                title="List of No Violation drivers"
+                title="List of Clean Inspection drivers"
                 rows={analytics.cleanInspections}
                 searchPlaceholder="Search clean inspections"
                 searchText={(row) =>
@@ -1290,10 +1402,6 @@ function DashboardSection() {
 
 function InspectionsSection() {
     const analytics = useAnalytics();
-    const oosPie = [
-        {name: "No", value: analytics.oosVsClean.Clean},
-        {name: "OOS", value: analytics.oosVsClean.OOS},
-    ];
 
     return (
         <PageSection
@@ -1304,7 +1412,7 @@ function InspectionsSection() {
                 <MetricCard label="Total Inspections" value={String(analytics.totalInspections)} icon={ShieldAlert}/>
                 <MetricCard label="OOS Inspections" value={String(analytics.oosVsClean.OOS)} icon={CircleAlert}
                             tone="negative"/>
-                <MetricCard label="No Inspections" value={String(analytics.oosVsClean.Clean)} icon={CircleSlash2}
+                <MetricCard label="Clean Inspections" value={String(analytics.oosVsClean.Clean)} icon={CircleSlash2}
                             tone="positive"/>
                 <MetricCard label="OOS Rate %" value={`${analytics.oosRate.toFixed(1)}%`} icon={LineChartIcon}
                             tone={analytics.oosRate > 20 ? "negative" : "positive"}/>
@@ -1326,17 +1434,17 @@ function InspectionsSection() {
                     </ResponsiveContainer>
                 </ChartCard>
 
-                <ChartCard title="OOS vs No Violation" icon={CircleAlert}>
+                <ChartCard title="OOS vs Clean Inspection" icon={CircleAlert}>
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                        <PieChart>
-                            <Pie data={oosPie} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90}>
-                                {oosPie.map((entry, index) => (
-                                    <Cell key={entry.name} fill={index === 0 ? "#10b981" : "#ef4444"}/>
-                                ))}
-                            </Pie>
+                        <BarChart data={analytics.monthlyInspection}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7"/>
+                            <XAxis dataKey="label" tick={{fontSize: 12}}/>
+                            <YAxis tick={{fontSize: 12}}/>
                             <Tooltip content={<ChartTooltip/>}/>
                             <Legend/>
-                        </PieChart>
+                            <Bar dataKey="clean" name="Clean Inspection" fill="#10b981" stackId="a" radius={[0, 0, 0, 0]}/>
+                            <Bar dataKey="oos" name="OOS" fill="#ef4444" stackId="a" radius={[4, 4, 0, 0]}/>
+                        </BarChart>
                     </ResponsiveContainer>
                 </ChartCard>
 
@@ -1373,6 +1481,8 @@ function InspectionsSection() {
                     </ResponsiveContainer>
                 </ChartCard>
             </div>
+            <USAStateMap inspections={analytics.filteredInspections.filter(r => r.reportNo !== "NON-INSPECTION")} />
+            <StateAnalytics inspections={analytics.filteredInspections.filter(r => r.reportNo !== "NON-INSPECTION")} />
             <DataTable<InspectionRecord>
                 title="Inspection Records"
                 rows={analytics.filteredInspections.filter(
@@ -1457,8 +1567,6 @@ function InspectionsSection() {
                 initialSortKey="inspectionDate"
             />
 
-            <USAStateMap inspections={analytics.filteredInspections.filter(r => r.reportNo !== "NON-INSPECTION")} />
-            <StateAnalytics inspections={analytics.filteredInspections.filter(r => r.reportNo !== "NON-INSPECTION")} />
 
 
         </PageSection>
@@ -1644,7 +1752,8 @@ function DriverScorecardSection() {
 
 function ViolationCategoriesSection() {
     const analytics = useAnalytics();
-    const { filteredDriverCharges } = useSafetyCompliance();
+    const { filteredInspections, filteredDriverCharges, dateBounds } = useSafetyCompliance();
+    const [driverPeriod, setDriverPeriod] = useState({ month: "", year: "" });
 
     const formatMoney = (value: number) =>
         new Intl.NumberFormat("en-US", {
@@ -1653,9 +1762,9 @@ function ViolationCategoriesSection() {
             minimumFractionDigits: 2,
         }).format(value);
 
-    const categorySummaries = analytics.categorySummaries.filter(
-        (row) => row.category !== "Other",
-    );
+    const categorySummaries = analytics.categorySummaries;
+
+    const categoryTrendData = useMemo(() => buildMonthlyCategoryTrend(analytics.filteredInspections), [analytics.filteredInspections]);
 
     const complianceRows: ComplianceRow[] = analytics.filteredInspections
         .filter((row) => row.reportNo !== "NON-INSPECTION")
@@ -1684,10 +1793,10 @@ function ViolationCategoriesSection() {
     );
     const driversInvolved = new Set(complianceRows.map((row) => row.driver)).size;
     const topCategory = categorySummaries[0]?.category ?? "N/A";
-    // Image 2 (driver charges) — summa bo'yicha
+
     const chargesByReason = Array.from(
         filteredDriverCharges.reduce<Map<string, number>>((map, row) => {
-            const key = row.reason || "Unknown";
+            const key = canonicalizeFinancialReason(row.reason);
             map.set(key, (map.get(key) ?? 0) + row.amount);
             return map;
         }, new Map()),
@@ -1695,16 +1804,50 @@ function ViolationCategoriesSection() {
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value);
 
-    // Image 2 (driver charges) — soni bo'yicha
+
     const countByReason = Array.from(
         filteredDriverCharges.reduce<Map<string, number>>((map, row) => {
-            const key = row.reason || "Unknown";
+            const key = canonicalizeFinancialReason(row.reason);
             map.set(key, (map.get(key) ?? 0) + 1);
             return map;
         }, new Map()),
     )
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value);
+
+    const years = useMemo(
+        () => buildYearOptions(dateBounds.minDate, dateBounds.maxDate),
+        [dateBounds.maxDate, dateBounds.minDate],
+    );
+
+    const driverChartRows = useMemo(() => {
+        if (!driverPeriod.month || !driverPeriod.year) {
+            return filteredInspections;
+        }
+
+        const month = driverPeriod.month.padStart(2, "0");
+        const key = `${driverPeriod.year}-${month}`;
+        return filteredInspections.filter((record) => monthKey(record.inspectionDate) === key);
+    }, [driverPeriod.month, driverPeriod.year, filteredInspections]);
+
+    const pointsByCategoryData = useMemo(
+        () => aggregatePointsByCategory(filteredInspections),
+        [filteredInspections],
+    );
+    const totalCategoryPoints = pointsByCategoryData.reduce((sum, row) => sum + row.points, 0);
+    const pointsByDriverData = useMemo(
+        () => aggregateDriverPointsByCategory(driverChartRows),
+        [driverChartRows],
+    );
+    const driverCategoryChartHeight = Math.max(320, pointsByDriverData.length * 28 + 96);
+
+    const CATEGORY_COLORS: Record<string, string> = {
+        "UNSAFE DRIVING": "#ef4444",
+        "HOS": "#f59e0b",
+        "VEHICLE MAINTENANCE": "#10b981",
+        "DRIVER FITNESS": "#3b82f6",
+        "INSURANCE AND OTHER": "#8b5cf6",
+    };
 
     return (
         <PageSection
@@ -1719,15 +1862,20 @@ function ViolationCategoriesSection() {
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
-                <ChartCard title="Violations by Category" icon={ShieldAlert}>
+                <ChartCard title="Violations Trend by Category Points" icon={ShieldAlert}>
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                        <BarChart data={categorySummaries}>
+                        <LineChart data={categoryTrendData}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                            <XAxis dataKey="category" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
+                            <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                             <YAxis tick={{ fontSize: 12 }} />
                             <Tooltip content={<ChartTooltip />} />
-                            <Bar dataKey="numberOfViolations" name="Violations" fill="#0f766e" radius={[8, 8, 0, 0]} />
-                        </BarChart>
+                            <Legend />
+                            <Line type="monotone" dataKey="UNSAFE DRIVING" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                            <Line type="monotone" dataKey="HOS" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                            <Line type="monotone" dataKey="VEHICLE MAINTENANCE" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                            <Line type="monotone" dataKey="DRIVER FITNESS" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                            <Line type="monotone" dataKey="INSURANCE AND OTHER" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                        </LineChart>
                     </ResponsiveContainer>
                 </ChartCard>
 
@@ -1743,20 +1891,100 @@ function ViolationCategoriesSection() {
                     </ResponsiveContainer>
                 </ChartCard>
 
-                <div className="xl:col-span-2" style={{ gridColumn: "1 / -1" }}>
-                    <ChartCard title="Number of Charges by Reason" icon={CircleAlert}>
-                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                            <BarChart data={countByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
-                                <Tooltip content={<ChartTooltip />} />
-                                <Bar dataKey="value" name="Charge Count" fill="#f59e0b" radius={[0, 8, 8, 0]} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </ChartCard>
-                </div>
+                <ChartCard title="Number of Charges by Reason" icon={CircleAlert}>
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                        <BarChart data={countByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                            <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
+                            <Tooltip content={<ChartTooltip />} />
+                            <Bar dataKey="value" name="Charge Count" fill="#f59e0b" radius={[0, 8, 8, 0]} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </ChartCard>
+
+                <ChartCard title="Points Distribution by Category" icon={ShieldAlert} contentClassName="h-80">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                        <PieChart margin={{ top: 8, right: 8, bottom: 16, left: 8 }}>
+                            <Pie
+                                data={pointsByCategoryData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={58}
+                                outerRadius={84}
+                                paddingAngle={4}
+                                cornerRadius={8}
+                                dataKey="points"
+                                nameKey="name"
+                                stroke="#ffffff"
+                                strokeWidth={2}
+                                labelLine={false}
+                                label={({ percent }) =>
+                                    `${Math.round((percent ?? 0) * 100)}%`
+                                }
+                            >
+                                {pointsByCategoryData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[entry.name] || "#8884d8"} />
+                                ))}
+                            </Pie>
+                            <text x="50%" y="40%" textAnchor="middle" dominantBaseline="middle" className="fill-zinc-500 text-[12px] font-medium">
+                                Total points
+                            </text>
+                            <text x="50%" y="48%" textAnchor="middle" dominantBaseline="middle" className="fill-zinc-950 text-2xl font-semibold">
+                                {totalCategoryPoints.toLocaleString("en-US")}
+                            </text>
+                            <Tooltip content={<ChartTooltip />} />
+                            <Legend verticalAlign="bottom" height={48} />
+                        </PieChart>
+                    </ResponsiveContainer>
+                </ChartCard>
             </div>
+
+            <ChartCard
+                title="Driver Points by Violation Criteria"
+                icon={BarChart3}
+                dynamicHeight={driverCategoryChartHeight}
+                contentClassName="h-auto"
+                headerRight={
+                    <PeriodSelector
+                        compact
+                        month={driverPeriod.month}
+                        year={driverPeriod.year}
+                        years={years}
+                        onMonthChange={(month) =>
+                            setDriverPeriod((current) => ({ ...current, month }))
+                        }
+                        onYearChange={(year) =>
+                            setDriverPeriod((current) => ({ ...current, year }))
+                        }
+                        onReset={() => setDriverPeriod({ month: "", year: "" })}
+                    />
+                }
+            >
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    <BarChart
+                        data={pointsByDriverData}
+                        layout="vertical"
+                        margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
+                    >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                        <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                        <YAxis
+                            type="category"
+                            dataKey="driver"
+                            width={140}
+                            tick={{ fontSize: 11 }}
+                        />
+                        <Tooltip content={<ChartTooltip />} />
+                        <Legend verticalAlign="bottom" height={44} />
+                        <Bar dataKey="unsafeDrivingPoints" name="Unsafe Driving" stackId="points" fill="#ef4444" />
+                        <Bar dataKey="hosPoints" name="HOS" stackId="points" fill="#f59e0b" />
+                        <Bar dataKey="vehicleMaintenancePoints" name="Vehicle Maintenance" stackId="points" fill="#10b981" />
+                        <Bar dataKey="driverFitnessPoints" name="Driver Fitness" stackId="points" fill="#3b82f6" />
+                        <Bar dataKey="insuranceAndOtherPoints" name="Insurance and Other" stackId="points" fill="#8b5cf6" />
+                    </BarChart>
+                </ResponsiveContainer>
+            </ChartCard>
 
             <DataTable<ComplianceRow>
                 title="Driver Compliance Breakdown"

@@ -5,7 +5,9 @@ import {
   type FleetCostRecord,
   type InspectionRecord,
   type RiskLevel,
+  monthKey,
 } from "@/lib/safety-compliance-data";
+import type { InspectionSheetSummary } from "@/lib/safety-compliance-types";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
 type FilterKey =
@@ -29,6 +31,7 @@ type SafetyComplianceContextValue = {
   filteredInspections: InspectionRecord[];
   filteredDriverCharges: DriverChargeRecord[];
   filteredFleetCosts: FleetCostRecord[];
+  inspectionSheetSummary: InspectionSheetSummary;
   dateBounds: {
     minDate: string;
     maxDate: string;
@@ -49,6 +52,7 @@ type SafetyComplianceContextValue = {
     units: string[];
     violationCategories: string[];
     expenseTypes: string[];
+    years: number[];
   };
 };
 
@@ -137,11 +141,13 @@ export function SafetyComplianceProvider({
   inspectionRecords,
   driverChargeRecords,
   fleetCostRecords,
+  inspectionSheetSummary,
 }: {
   children: ReactNode;
   inspectionRecords: InspectionRecord[];
   driverChargeRecords: DriverChargeRecord[];
   fleetCostRecords: FleetCostRecord[];
+  inspectionSheetSummary: InspectionSheetSummary;
 }) {
   const allDates = useMemo(
     () =>
@@ -227,6 +233,18 @@ export function SafetyComplianceProvider({
     [fleetCostRecords, inspectionRecords],
   );
 
+  const years = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          allDates
+            .map((date) => Number(monthKey(date).slice(0, 4)))
+            .filter((year) => Number.isFinite(year)),
+        ),
+      ).sort((a, b) => a - b),
+    [allDates],
+  );
+
   const filteredInspections = useMemo(
     () => filterInspections(inspectionRecords, filters),
     [filters, inspectionRecords],
@@ -257,6 +275,7 @@ export function SafetyComplianceProvider({
       filteredInspections,
       filteredDriverCharges,
       filteredFleetCosts,
+      inspectionSheetSummary,
       dateBounds: {
         minDate: allDates[0] ?? "",
         maxDate: allDates.at(-1) ?? "",
@@ -277,6 +296,7 @@ export function SafetyComplianceProvider({
         units,
         violationCategories: violationCategoryOptions,
         expenseTypes: expenseTypeOptions,
+        years,
       },
     }),
     [
@@ -288,6 +308,7 @@ export function SafetyComplianceProvider({
       filteredDriverCharges,
       filteredFleetCosts,
       filteredInspections,
+      inspectionSheetSummary,
       filters,
       fleetCostRecords.length,
       inspectionLevelOptions,
@@ -297,6 +318,7 @@ export function SafetyComplianceProvider({
       units,
       vehiclePlates,
       violationCategoryOptions,
+      years,
     ],
   );
 

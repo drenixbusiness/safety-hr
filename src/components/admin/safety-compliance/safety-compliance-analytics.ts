@@ -11,6 +11,7 @@ import {
   canonicalizeFinancialReason,
   normalizeName
 } from "@/lib/safety-compliance-data";
+import type { InspectionSheetSummary } from "@/lib/safety-compliance-types";
 
 export type MonthlyPoint = {
   month: string;
@@ -38,6 +39,21 @@ export type CategorySummary = {
   totalCharges: number;
   mostCommonReason: string;
   driversInvolved: number;
+};
+
+export type CategoryPointRow = {
+  name: ViolationCategory;
+  points: number;
+};
+
+export type DriverCategoryPointRow = {
+  driver: string;
+  unsafeDrivingPoints: number;
+  hosPoints: number;
+  vehicleMaintenancePoints: number;
+  driverFitnessPoints: number;
+  insuranceAndOtherPoints: number;
+  totalPoints: number;
 };
 
 export type FleetSummary = {
@@ -112,6 +128,7 @@ export function aggregateMonthlyInspectionData(records: InspectionRecord[]) {
       income: bucket.totalIncome,
       inspections: bucket.inspectionCount,
       oos: bucket.oosCount,
+      clean: bucket.inspectionCount - bucket.oosCount,
     }));
 }
 
@@ -173,7 +190,7 @@ export function aggregateDriverSummaries(records: InspectionRecord[]) {
     : "";
 
   return Array.from(grouped.entries())
-    .map(([_, driverRecords]) => {
+    .map(([, driverRecords]) => {
       const driver = driverRecords[0].driver;
       const totalViolationPoints = driverRecords.reduce(
         (sum, record) => sum + record.totalViolationPoints,
@@ -297,31 +314,20 @@ export function aggregateCategories(records: InspectionRecord[]) {
   };
 
   for (const record of records) {
-    const categoriesFound = getRecordCategories(record);
+    const bucket = ensureBucket(record.violationCategory);
+    bucket.numberOfViolations += 1;
+    bucket.drivers.add(record.driver);
+    bucket.totalPoints += record.totalViolationPoints;
+    bucket.totalCharges += record.chargeAmount;
 
-    for (const cat of categoriesFound) {
-      const bucket = ensureBucket(cat);
-      bucket.numberOfViolations += 1;
-      bucket.drivers.add(record.driver);
+    let specificReason = "Unknown";
+    if (record.violationCategory === "UNSAFE DRIVING") specificReason = record.unsafeDrivingReason || "Unsafe Driving";
+    else if (record.violationCategory === "HOS") specificReason = record.hosComplianceReason || "HOS Violation";
+    else if (record.violationCategory === "VEHICLE MAINTENANCE") specificReason = record.vehicleMaintenanceReason || "Maintenance Issue";
+    else if (record.violationCategory === "DRIVER FITNESS") specificReason = "Driver Fitness Violation";
+    else specificReason = record.violationReason || "Insurance and Other";
 
-      // Distribute points and charges?
-      // For now, let's attribute the full points/charges to each category involved
-      // which is better than ignoring them, though it might overcount totals in the category summary.
-      // But usually, one inspection has one set of points/charges for all violations.
-      bucket.totalPoints += record.totalViolationPoints;
-      bucket.totalCharges += record.chargeAmount;
-
-      let specificReason = "Unknown";
-      if (cat === "Unsafe Driving") specificReason = record.unsafeDrivingReason || "Unsafe Driving";
-      else if (cat === "Hours-of-Service Compliance") specificReason = record.hosComplianceReason || "HOS Violation";
-      else if (cat === "Vehicle Maintenance") specificReason = record.vehicleMaintenanceReason || "Maintenance Issue";
-      else if (cat === "Controlled Substances and Alcohol") specificReason = record.alcoholSubstanceReason || "Substance Issue";
-      else if (cat === "Crash Indicator") specificReason = record.crashIndicatorReason || "Crash Related";
-      else if (cat === "Documents / Registration") specificReason = record.documentsRegistrationReason || "Doc/Reg Issue";
-      else specificReason = record.violationReason;
-
-      bucket.reasons.set(specificReason, (bucket.reasons.get(specificReason) ?? 0) + 1);
-    }
+    bucket.reasons.set(specificReason, (bucket.reasons.get(specificReason) ?? 0) + 1);
   }
 
   return Array.from(grouped.entries())
@@ -339,6 +345,79 @@ export function aggregateCategories(records: InspectionRecord[]) {
         driversInvolved: bucket.drivers.size,
       } satisfies CategorySummary;
     })
+    .sort((a, b) => b.totalPoints - a.totalPoints);
+}
+
+export function aggregatePointsByCategory(summary: InspectionSheetSummary): CategoryPointRow[];
+export function aggregatePointsByCategory(records: InspectionRecord[]): CategoryPointRow[];
+export function aggregatePointsByCategory(
+  input: InspectionSheetSummary | InspectionRecord[],
+) {
+  if (Array.isArray(input)) {
+    const summary = {
+      "UNSAFE DRIVING": 0,
+      HOS: 0,
+      "VEHICLE MAINTENANCE": 0,
+      "DRIVER FITNESS": 0,
+      "INSURANCE AND OTHER": 0,
+    } satisfies Record<ViolationCategory, number>;
+
+    for (const record of input) {
+      summary["UNSAFE DRIVING"] += record.unsafeDrivingPoints;
+      summary.HOS += record.hosPoints;
+      summary["VEHICLE MAINTENANCE"] += record.vehicleMaintenancePoints;
+      summary["DRIVER FITNESS"] += record.driverFitnessPoints;
+      summary["INSURANCE AND OTHER"] += record.insuranceAndOtherPoints;
+    }
+
+    return Object.entries(summary)
+      .map(([name, points]) => ({ name: name as ViolationCategory, points }))
+      .filter((item) => item.points > 0);
+  }
+
+  return [
+    { name: "UNSAFE DRIVING", points: input.unsafeDrivingPoints },
+    { name: "HOS", points: input.hosPoints },
+    { name: "VEHICLE MAINTENANCE", points: input.vehicleMaintenancePoints },
+    { name: "DRIVER FITNESS", points: input.driverFitnessPoints },
+    { name: "INSURANCE AND OTHER", points: input.insuranceAndOtherPoints },
+  ].filter((item) => item.points > 0);
+}
+
+export function aggregateDriverPointsByCategory(records: InspectionRecord[]) {
+  const grouped = new Map<string, DriverCategoryPointRow>();
+
+  for (const record of records) {
+    const key = record.driver.trim();
+    if (!key) continue;
+
+    const existing = grouped.get(key) ?? {
+      driver: record.driver,
+      unsafeDrivingPoints: 0,
+      hosPoints: 0,
+      vehicleMaintenancePoints: 0,
+      driverFitnessPoints: 0,
+      insuranceAndOtherPoints: 0,
+      totalPoints: 0,
+    };
+
+    existing.unsafeDrivingPoints += record.unsafeDrivingPoints;
+    existing.hosPoints += record.hosPoints;
+    existing.vehicleMaintenancePoints += record.vehicleMaintenancePoints;
+    existing.driverFitnessPoints += record.driverFitnessPoints;
+    existing.insuranceAndOtherPoints += record.insuranceAndOtherPoints;
+    existing.totalPoints +=
+      record.unsafeDrivingPoints +
+      record.hosPoints +
+      record.vehicleMaintenancePoints +
+      record.driverFitnessPoints +
+      record.insuranceAndOtherPoints;
+
+    grouped.set(key, existing);
+  }
+
+  return Array.from(grouped.values())
+    .filter((item) => item.totalPoints > 0)
     .sort((a, b) => b.totalPoints - a.totalPoints);
 }
 
@@ -386,10 +465,10 @@ export function aggregateChargesByDriver(records: InspectionRecord[]) {
 export function aggregateChargesByCategory(records: InspectionRecord[]) {
   const grouped = new Map<ViolationCategory, number>();
   for (const record of records) {
-    const cats = getRecordCategories(record);
-    for (const cat of cats) {
-      grouped.set(cat, (grouped.get(cat) ?? 0) + record.chargeAmount);
-    }
+    grouped.set(
+      record.violationCategory,
+      (grouped.get(record.violationCategory) ?? 0) + record.chargeAmount,
+    );
   }
   return Array.from(grouped.entries())
     .map(([name, value]) => ({ name, value }))
@@ -399,10 +478,10 @@ export function aggregateChargesByCategory(records: InspectionRecord[]) {
 export function aggregateSafetyLossByCategory(records: InspectionRecord[]) {
   const grouped = new Map<ViolationCategory, number>();
   for (const record of records) {
-    const cats = getRecordCategories(record);
-    for (const cat of cats) {
-      grouped.set(cat, (grouped.get(cat) ?? 0) + record.safetyLossImpact);
-    }
+    grouped.set(
+      record.violationCategory,
+      (grouped.get(record.violationCategory) ?? 0) + record.safetyLossImpact,
+    );
   }
   return Array.from(grouped.entries())
     .map(([name, value]) => ({ name, value }))
@@ -412,47 +491,25 @@ export function aggregateSafetyLossByCategory(records: InspectionRecord[]) {
 export function buildMonthlyCategoryTrend(records: InspectionRecord[]) {
   const months = Array.from(new Set(records.map((record) => monthKey(record.inspectionDate)))).sort();
   const categories = [
-    "Unsafe Driving",
-    "Hours-of-Service Compliance",
-    "Vehicle Maintenance",
-    "Crash Indicator",
-    "Controlled Substances and Alcohol",
-    "Documents / Registration",
-    "Other",
+    "UNSAFE DRIVING",
+    "HOS",
+    "VEHICLE MAINTENANCE",
+    "DRIVER FITNESS",
+    "INSURANCE AND OTHER",
   ] as const;
 
   return months.map((month) => {
     const entry: Record<string, number | string> = { month, label: monthLabelFromKey(month) };
     for (const category of categories) {
-      entry[category] = records.filter((record) => {
-        if (monthKey(record.inspectionDate) !== month) return false;
-        const cats = getRecordCategories(record);
-        return cats.has(category);
-      }).length;
+      entry[category] = records
+        .filter((record) => {
+          if (monthKey(record.inspectionDate) !== month) return false;
+          return record.violationCategory === category;
+        })
+        .reduce((sum, r) => sum + r.totalViolationPoints, 0);
     }
     return entry;
   });
-}
-
-function getRecordCategories(record: InspectionRecord): Set<ViolationCategory> {
-  const categoriesFound = new Set<ViolationCategory>();
-
-  if (record.unsafeDrivingReason) categoriesFound.add("Unsafe Driving");
-  if (record.hosComplianceReason) categoriesFound.add("Hours-of-Service Compliance");
-  if (record.vehicleMaintenanceReason) categoriesFound.add("Vehicle Maintenance");
-  if (record.alcoholSubstanceReason) categoriesFound.add("Controlled Substances and Alcohol");
-  if (record.crashIndicatorReason) categoriesFound.add("Crash Indicator");
-  if (record.documentsRegistrationReason) categoriesFound.add("Documents / Registration");
-
-  if (categoriesFound.size === 0 && record.violationCategory !== "Other") {
-    categoriesFound.add(record.violationCategory);
-  }
-
-  if (categoriesFound.size === 0 && (record.totalViolationPoints > 0 || record.chargeAmount > 0)) {
-    categoriesFound.add("Other");
-  }
-
-  return categoriesFound;
 }
 
 export function aggregateCompanyExpenseByType(records: InspectionRecord[]) {

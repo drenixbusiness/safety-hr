@@ -9,6 +9,7 @@ import {
   normalizeName,
   type RiskLevel,
 } from "@/lib/safety-compliance-data";
+import type { InspectionSheetSummary } from "@/lib/safety-compliance-types";
 
 type CsvRow = string[];
 
@@ -16,6 +17,7 @@ type LoadedSafetyComplianceData = {
   inspectionRecords: InspectionRecord[];
   driverChargeRecords: DriverChargeRecord[];
   fleetCostRecords: FleetCostRecord[];
+  inspectionSheetSummary: InspectionSheetSummary;
 };
 
 function parseCsv(text: string): CsvRow[] {
@@ -123,6 +125,100 @@ function parseDate(value: string | undefined) {
   return "";
 }
 
+function normalizeHeader(value: string) {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, " ");
+}
+
+function findColumnIndex(headers: CsvRow, candidates: string[]) {
+  const normalizedHeaders = headers.map(normalizeHeader);
+  for (const candidate of candidates) {
+    const normalizedCandidate = normalizeHeader(candidate);
+    const index = normalizedHeaders.findIndex((header) => header === normalizedCandidate);
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
+type InspectionSheetColumns = {
+  inspectionDate: number;
+  reportNo: number;
+  fmcsaPostDate: number;
+  inspectionLevel: number;
+  oosViolations: number;
+  driver: number;
+  vin: number;
+  vehiclePlate: number;
+  points: number;
+  charges: number;
+  unsafeDrivingPoints: number;
+  hosPoints: number;
+  vehicleMaintenancePoints: number;
+  driverFitnessPoints: number;
+  insuranceAndOtherPoints: number;
+};
+
+function buildInspectionColumns(headers: CsvRow): InspectionSheetColumns {
+  const columns = {
+    inspectionDate: findColumnIndex(headers, ["Inspection Date"]),
+    reportNo: findColumnIndex(headers, ["Report #", "Report No", "Report"]),
+    fmcsaPostDate: findColumnIndex(headers, ["FMCSA Post Date"]),
+    inspectionLevel: findColumnIndex(headers, ["Inspection Level"]),
+    oosViolations: findColumnIndex(headers, ["# OOS Violations", "OOS Violations"]),
+    driver: findColumnIndex(headers, ["Driver"]),
+    vin: findColumnIndex(headers, ["VIN"]),
+    vehiclePlate: findColumnIndex(headers, ["Veh Plate", "Vehicle Plate"]),
+    points: findColumnIndex(headers, ["Points"]),
+    charges: findColumnIndex(headers, ["charges", "Charges"]),
+    unsafeDrivingPoints: findColumnIndex(headers, ["UNSAFE DRIVING"]),
+    hosPoints: findColumnIndex(headers, ["HOS"]),
+    vehicleMaintenancePoints: findColumnIndex(headers, ["VEHICLE MAINTANCE", "VEHICLE MAINTENANCE"]),
+    driverFitnessPoints: findColumnIndex(headers, ["DRIVER FITNESS"]),
+    insuranceAndOtherPoints: findColumnIndex(headers, ["INURANCE AND OTHER", "INSURANCE AND OTHER"]),
+  } satisfies InspectionSheetColumns;
+
+  const missing = Object.entries(columns).filter(([, index]) => index < 0).map(([name]) => name);
+  if (missing.length) {
+    throw new Error(`Inspection sheet is missing expected columns: ${missing.join(", ")}`);
+  }
+
+  return columns;
+}
+
+function isInspectionFooterRow(row: CsvRow, columns: InspectionSheetColumns) {
+  const leadingBlank = row.slice(0, columns.points).every((cell) => clean(cell) === "");
+  return (
+    leadingBlank &&
+    parseInteger(row[columns.points]) > 0 &&
+    parseInteger(row[columns.charges]) >= 0 &&
+    parseInteger(row[columns.unsafeDrivingPoints]) >= 0 &&
+    parseInteger(row[columns.hosPoints]) >= 0 &&
+    parseInteger(row[columns.vehicleMaintenancePoints]) >= 0 &&
+    parseInteger(row[columns.driverFitnessPoints]) >= 0 &&
+    parseInteger(row[columns.insuranceAndOtherPoints]) >= 0
+  );
+}
+
+function parseInspectionSheetSummary(row: CsvRow, columns: InspectionSheetColumns): InspectionSheetSummary {
+  const unsafeDrivingPoints = parseInteger(row[columns.unsafeDrivingPoints]);
+  const hosPoints = parseInteger(row[columns.hosPoints]);
+  const vehicleMaintenancePoints = parseInteger(row[columns.vehicleMaintenancePoints]);
+  const driverFitnessPoints = parseInteger(row[columns.driverFitnessPoints]);
+  const insuranceAndOtherPoints = parseInteger(row[columns.insuranceAndOtherPoints]);
+
+  return {
+    totalInspectionPoints: parseInteger(row[columns.points]),
+    totalCharges: parseAmount(row[columns.charges]),
+    unsafeDrivingPoints,
+    hosPoints,
+    vehicleMaintenancePoints,
+    driverFitnessPoints,
+    insuranceAndOtherPoints,
+    categoryPointsTotal:
+      parseInteger(row[columns.insuranceAndOtherPoints + 1]) ||
+      unsafeDrivingPoints + hosPoints + vehicleMaintenancePoints + driverFitnessPoints + insuranceAndOtherPoints,
+  };
+}
+
 
 function matchesDateOrName(
   inspectionDate: string,
@@ -137,181 +233,168 @@ function matchesDateOrName(
 
 function normalizeReason(reason: string | undefined) {
   const cleaned = clean(reason);
-  const upper = cleaned.toUpperCase();
-
-  if (upper.includes("PLATE") || upper.includes("REGISTRATION")) return "Fake Plate";
-  if (upper.includes("IFTA")) return "Fake IFTA Stickers";
-
   if (
-    !upper ||
-    upper === "NO VIOLATIONS" ||
-    upper === "NO VIOLATION" ||
-    upper === "NONE" ||
-    upper === "CLEAN" ||
-    upper === "NO CHARGE LISTED" ||
-    upper === "NO CHARGES"
+    !cleaned ||
+    /^(NO VIOLATION|NO VIOLATIONS|NONE|CLEAN|NO CHARGE LISTED|NO CHARGES)$/i.test(cleaned)
   ) {
     return "No violations";
   }
-
   return cleaned;
 }
 
 function loadInspectionRecords(
   rows: CsvRow[],
+  columns: InspectionSheetColumns,
   driverCharges: DriverChargeRecord[],
   matchedChargeIndices: Set<number>,
   fleetLookupByVin: Map<string, { unit: string; year: number; make: string; plate: string }>,
   financialSummaries: Map<string, DriverFinancialSummary>,
   complianceSummaries: Map<string, DriverComplianceSummary>,
 ) {
-  return rows.map((row) => {
-    const reportNo = clean(row[1]);
-    const stateMatch = reportNo.match(/^([A-Z]{2})-/);
-    const state = stateMatch ? stateMatch[1] : undefined;
-    const inspectionDate = parseDate(row[2]);
-    const driverRaw = clean(row[6]);
-    const driverNormalized = normalizeName(driverRaw);
+  return rows
+    .filter((row) => !isInspectionFooterRow(row, columns))
+    .map((row) => {
+      const reportNo = clean(row[columns.reportNo]);
+      const inspectionDate = parseDate(row[columns.inspectionDate]);
+      const driverRaw = clean(row[columns.driver]);
+      const driverNormalized = normalizeName(driverRaw);
 
-    const matchedChargeIndex = driverCharges.findIndex(
-      (charge, index) =>
-        !matchedChargeIndices.has(index) &&
-        matchesDateOrName(inspectionDate, driverRaw, charge),
-    );
-    const matchedCharge =
-      matchedChargeIndex >= 0 ? driverCharges[matchedChargeIndex] : undefined;
-    if (matchedChargeIndex >= 0) {
-      matchedChargeIndices.add(matchedChargeIndex);
-    }
+      const matchedChargeIndex = driverCharges.findIndex(
+        (charge, index) =>
+          !matchedChargeIndices.has(index) &&
+          matchesDateOrName(inspectionDate, driverRaw, charge),
+      );
+      const matchedCharge =
+        matchedChargeIndex >= 0 ? driverCharges[matchedChargeIndex] : undefined;
+      if (matchedChargeIndex >= 0) {
+        matchedChargeIndices.add(matchedChargeIndex);
+      }
 
-    // Look for compliance summary (by driver + date)
-    const complianceKey = `${driverNormalized}_${inspectionDate}`;
-    const compSummary = complianceSummaries.get(complianceKey);
+      const complianceKey = `${driverNormalized}_${inspectionDate}`;
+      const compSummary = complianceSummaries.get(complianceKey);
+      const finSummary = financialSummaries.get(driverNormalized);
 
-    // Look for financial summary (by driver)
-    const finSummary = financialSummaries.get(driverNormalized);
+      const reason = normalizeReason(matchedCharge?.reason);
+      const unsafeReason = normalizeReason(compSummary?.unsafe);
+      const hosReason = normalizeReason(compSummary?.hos);
+      const maintenanceReason = normalizeReason(compSummary?.maintenance);
+      const alcoholReason = normalizeReason(compSummary?.alcohol);
+      const crashReason = normalizeReason(compSummary?.crash);
 
-    const reason = normalizeReason(matchedCharge?.reason);
-    const unsafeReason = normalizeReason(compSummary?.unsafe);
-    const hosReason = normalizeReason(compSummary?.hos);
-    const maintenanceReason = normalizeReason(compSummary?.maintenance);
-    const alcoholReason = normalizeReason(compSummary?.alcohol);
-    const crashReason = normalizeReason(compSummary?.crash);
+      const detectedReasons = new Set<string>();
+      if (reason !== "No violations") detectedReasons.add(reason);
+      if (unsafeReason !== "No violations") detectedReasons.add(unsafeReason);
+      if (hosReason !== "No violations") detectedReasons.add(hosReason);
+      if (maintenanceReason !== "No violations") detectedReasons.add(maintenanceReason);
+      if (alcoholReason !== "No violations") detectedReasons.add(alcoholReason);
+      if (crashReason !== "No violations") detectedReasons.add(crashReason);
 
-    // Collect all unique non-empty reasons
-    const detectedReasons = new Set<string>();
-    if (reason !== "No violations") detectedReasons.add(reason);
-    if (unsafeReason !== "No violations") detectedReasons.add(unsafeReason);
-    if (hosReason !== "No violations") detectedReasons.add(hosReason);
-    if (maintenanceReason !== "No violations") detectedReasons.add(maintenanceReason);
-    if (alcoholReason !== "No violations") detectedReasons.add(alcoholReason);
-    if (crashReason !== "No violations") detectedReasons.add(crashReason);
-
-    // If still no reason but we have points or OOS violations
-    if (detectedReasons.size === 0) {
-      const points = parseInteger(row[9]);
-      const oos = parseInteger(row[5]);
-      if (oos > 0 || points > 0) {
+      const totalViolationPoints = parseInteger(row[columns.points]);
+      const oosViolations = parseInteger(row[columns.oosViolations]);
+      if (detectedReasons.size === 0 && (oosViolations > 0 || totalViolationPoints > 0)) {
         detectedReasons.add("Citation");
       }
-    }
 
-    const finalReason = detectedReasons.size > 0
-      ? Array.from(detectedReasons).join("; ")
-      : "No violations";
+      const finalReason = detectedReasons.size > 0
+        ? Array.from(detectedReasons).join("; ")
+        : "No violations";
 
-    const chargeAmount = matchedCharge?.amount ?? 0;
-    const points = parseInteger(row[10]);
-    const totalViolationPoints = points;
-    const violationCategory = categoryFromReason(finalReason);
-    const companyExpenseImpact = /registration|plate|ifta|towing|portal/i.test(finalReason)
-      ? chargeAmount
-      : 0;
-    const safetyLossImpact = totalViolationPoints * 25 + chargeAmount;
+      const chargeAmount = matchedCharge?.amount ?? parseAmount(row[columns.charges]);
+      const violationCategory = categoryFromReason(finalReason);
+      const companyExpenseImpact = /registration|plate|ifta|towing|portal/i.test(finalReason)
+        ? chargeAmount
+        : 0;
+      const safetyLossImpact = totalViolationPoints * 25 + chargeAmount;
+      const vin = clean(row[columns.vin]);
+      const fleetMatch = fleetLookupByVin.get(vin);
 
-    const vin = clean(row[7]);
-    const fleetMatch = fleetLookupByVin.get(vin);
+      const crashIndicator = compSummary?.crash
+        ? compSummary.crash.toUpperCase() === "FAIL" || compSummary.crash.toUpperCase() === "YES"
+          ? "Yes"
+          : "No"
+        : /crash/i.test(finalReason)
+          ? "Yes"
+          : "No";
 
-    // Compliance indicators from summary if available
-    const crashIndicator = compSummary?.crash
-      ? compSummary.crash.toUpperCase() === "FAIL" || compSummary.crash.toUpperCase() === "YES"
-        ? "Yes"
-        : "No"
-      : /crash/i.test(finalReason)
-        ? "Yes"
-        : "No";
+      const hoursOfServiceCompliance = compSummary?.hos
+        ? compSummary.hos.toUpperCase() === "FAIL" ? "Fail" : "Pass"
+        : /eld|duty|hours/i.test(finalReason)
+          ? "Fail"
+          : "Pass";
 
-    const hoursOfServiceCompliance = compSummary?.hos
-      ? compSummary.hos.toUpperCase() === "FAIL" ? "Fail" : "Pass"
-      : /eld|duty|hours/i.test(finalReason)
-        ? "Fail"
-        : "Pass";
+      const vehicleMaintenance = compSummary?.maintenance
+        ? compSummary.maintenance.toUpperCase() === "FAIL" ? "Fail" : "Pass"
+        : /tire|brake|light|wheel|rim/i.test(finalReason)
+          ? "Fail"
+          : "Pass";
 
-    const vehicleMaintenance = compSummary?.maintenance
-      ? compSummary.maintenance.toUpperCase() === "FAIL" ? "Fail" : "Pass"
-      : /tire|brake|light|wheel|rim/i.test(finalReason)
-        ? "Fail"
-        : "Pass";
+      const controlledSubstancesAndAlcohol = compSummary?.alcohol
+        ? compSummary.alcohol.toUpperCase() === "FAIL" ? "Fail" : "Pass"
+        : /alcohol|controlled|substance/i.test(finalReason)
+          ? "Fail"
+          : "Pass";
 
-    const controlledSubstancesAndAlcohol = compSummary?.alcohol
-      ? compSummary.alcohol.toUpperCase() === "FAIL" ? "Fail" : "Pass"
-      : /alcohol|controlled|substance/i.test(finalReason)
-        ? "Fail"
-        : "Pass";
+      let riskLevel: RiskLevel = riskLabelFromPoints(totalViolationPoints);
+      if (finSummary?.riskLevel) {
+        const rl = finSummary.riskLevel.toLowerCase();
+        if (rl.includes("high") || rl.includes("critical")) riskLevel = "High";
+        else if (rl.includes("medium")) riskLevel = "Medium";
+        else if (rl.includes("low") || rl.includes("lower")) riskLevel = "Low";
+      }
 
-    let riskLevel: RiskLevel = riskLabelFromPoints(totalViolationPoints);
-    if (finSummary?.riskLevel) {
-      const rl = finSummary.riskLevel.toLowerCase();
-      if (rl.includes("high") || rl.includes("critical")) riskLevel = "High";
-      else if (rl.includes("medium")) riskLevel = "Medium";
-      else if (rl.includes("low") || rl.includes("lower")) riskLevel = "Low";
-    }
+      const docRegReason = /plate|registration|ifta|cab card|document|license/i.test(finalReason)
+        ? finalReason.split("; ").find((r) => /plate|registration|ifta|cab card|document|license/i.test(r))
+        : undefined;
+      const unsafeDrivingPoints = parseInteger(row[columns.unsafeDrivingPoints]);
+      const hosPoints = parseInteger(row[columns.hosPoints]);
+      const vehicleMaintenancePoints = parseInteger(row[columns.vehicleMaintenancePoints]);
+      const driverFitnessPoints = parseInteger(row[columns.driverFitnessPoints]);
+      const insuranceAndOtherPoints = parseInteger(row[columns.insuranceAndOtherPoints]);
 
-    // Determine documents/registration reason
-    const docRegReason = /plate|registration|ifta|cab card|document|license/i.test(finalReason)
-      ? finalReason.split("; ").find(r => /plate|registration|ifta|cab card|document|license/i.test(r))
-      : undefined;
-
-    return {
-      status: clean(row[0]) as InspectionRecord["status"],
-      reportNo,
-      inspectionDate,
-      fmcsaPostDate: parseDate(row[3]),
-      inspectionLevel: clean(row[4]) as InspectionRecord["inspectionLevel"],
-      oosViolations: parseInteger(row[5]),
-      driver: driverRaw,
-      vin,
-      vehiclePlate: clean(row[8]),
-      points,
-      charges: chargeAmount,
-      incomeAmount: parseAmount(row[11]),
-      totalViolationPoints,
-      chargeAmount,
-      violationReason: finalReason,
-      safetyLossImpact,
-      companyExpenseImpact,
-      riskLevel,
-      crashIndicator,
-      hoursOfServiceCompliance,
-      vehicleMaintenance,
-      controlledSubstancesAndAlcohol,
-      unsafeDrivingReason: unsafeReason !== "No violations" ? unsafeReason : undefined,
-      hosComplianceReason: hosReason !== "No violations" ? hosReason : undefined,
-      vehicleMaintenanceReason: maintenanceReason !== "No violations" ? maintenanceReason : undefined,
-      alcoholSubstanceReason: alcoholReason !== "No violations" ? alcoholReason : undefined,
-      crashIndicatorReason: crashReason !== "No violations" ? crashReason : undefined,
-      documentsRegistrationReason: docRegReason,
-      unit: fleetMatch?.unit ?? "",
-      year: fleetMatch?.year ?? 0,
-      make: fleetMatch?.make ?? "",
-      plate: fleetMatch?.plate ?? clean(row[8]),
-      price: chargeAmount,
-      totalPrice: chargeAmount,
-      expenseType: companyExpenseImpact > 0 ? "Company Expense" : "Driver Charges",
-      violationCategory,
-      state,
-    } satisfies InspectionRecord;
-  });
+      return {
+        status: oosViolations > 0 ? "OOS" : "Clean Inspection",
+        reportNo,
+        inspectionDate,
+        fmcsaPostDate: parseDate(row[columns.fmcsaPostDate]),
+        inspectionLevel: clean(row[columns.inspectionLevel]) as InspectionRecord["inspectionLevel"],
+        oosViolations,
+        driver: driverRaw,
+        vin,
+        vehiclePlate: clean(row[columns.vehiclePlate]),
+        points: totalViolationPoints,
+        charges: chargeAmount,
+        incomeAmount: finSummary?.charges ?? chargeAmount,
+        totalViolationPoints,
+        chargeAmount,
+        violationReason: finalReason,
+        safetyLossImpact,
+        companyExpenseImpact,
+        riskLevel,
+        crashIndicator,
+        hoursOfServiceCompliance,
+        vehicleMaintenance,
+        controlledSubstancesAndAlcohol,
+        unsafeDrivingReason: unsafeReason !== "No violations" ? unsafeReason : undefined,
+        hosComplianceReason: hosReason !== "No violations" ? hosReason : undefined,
+        vehicleMaintenanceReason: maintenanceReason !== "No violations" ? maintenanceReason : undefined,
+        alcoholSubstanceReason: alcoholReason !== "No violations" ? alcoholReason : undefined,
+        crashIndicatorReason: crashReason !== "No violations" ? crashReason : undefined,
+        documentsRegistrationReason: docRegReason,
+        unsafeDrivingPoints,
+        hosPoints,
+        vehicleMaintenancePoints,
+        driverFitnessPoints,
+        insuranceAndOtherPoints,
+        unit: fleetMatch?.unit ?? "",
+        year: fleetMatch?.year ?? 0,
+        make: fleetMatch?.make ?? "",
+        plate: fleetMatch?.plate ?? clean(row[columns.vehiclePlate]),
+        price: chargeAmount,
+        totalPrice: chargeAmount,
+        expenseType: companyExpenseImpact > 0 ? "Company Expense" : "Driver Charges",
+        violationCategory,
+      } satisfies InspectionRecord;
+    });
 }
 
 function loadDriverChargeRecords(rows: CsvRow[]) {
@@ -409,31 +492,65 @@ type DriverComplianceSummary = {
   date: string;
 };
 
+function extractSheetId(input: string): string {
+  const trimmed = input.trim();
+  const match = trimmed.match(/spreadsheets\/d\/([^/]+)/);
+  if (match) return match[1];
+  // Accept bare ID fallback
+  if (/^[A-Za-z0-9-_]+$/.test(trimmed)) return trimmed;
+  throw new Error("Invalid DATA env var. Expecting full Google Sheet URL or spreadsheet ID.");
+}
+
 export async function loadSafetyComplianceData(): Promise<LoadedSafetyComplianceData> {
-  const sheetId = process.env.DATA;
-  if (!sheetId) {
+  const dataEnv = process.env.DATA;
+  if (!dataEnv) {
     throw new Error("Missing DATA env var for Safety & Compliance sheet");
   }
+  const sheetId = extractSheetId(dataEnv);
 
-  const urls = [
+  const inspectionTabRows: CsvRow[] = [];
+  const baseRows: CsvRow[] = [];
+
+  // 1. Fetch from specific tab (gid=1177354161)
+  const inspectionsUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=1177354161`;
+  try {
+    const res = await fetch(inspectionsUrl, { cache: "no-store" });
+    if (res.ok) {
+      const csv = await res.text();
+      inspectionTabRows.push(...parseCsv(csv));
+    }
+  } catch (error) {
+    console.error("Failed to fetch inspections tab", error);
+  }
+
+  // 2. Fetch from base sheet(s)
+  const baseUrls = [
     `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`,
     `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`,
   ];
-
-  let csvText = "";
-  for (const url of urls) {
-    const response = await fetch(url, { cache: "no-store" });
-    if (response.ok) {
-      csvText = await response.text();
-      break;
+  for (const url of baseUrls) {
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (res.ok) {
+        const csv = await res.text();
+        baseRows.push(...parseCsv(csv));
+        break;
+      }
+    } catch {
+      // try next
     }
   }
 
-  if (!csvText) {
-    throw new Error("Unable to load Safety & Compliance sheet");
+  if (inspectionTabRows.length === 0) {
+    throw new Error("Unable to load inspection data from Safety & Compliance sheet");
   }
 
-  const rows = parseCsv(csvText);
+  if (baseRows.length === 0) {
+    throw new Error("Unable to load supporting Safety & Compliance sheet data");
+  }
+
+  const inspectionColumns = buildInspectionColumns(inspectionTabRows[0] ?? []);
+  const inspectionDataRows = inspectionTabRows.slice(1);
 
   const inspectionRows: CsvRow[] = [];
   const driverChargeRows: CsvRow[] = [];
@@ -444,12 +561,15 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
   let currentSection: "unknown" | "fleet" = "unknown";
   let inComplianceSummary = false;
 
-  for (const row of rows) {
+  const seenChargeKeys = new Set<string>();
+
+  for (const row of baseRows) {
+    if (row.length < 2) continue;
     const col0 = clean(row[0]);
+    const col1 = clean(row[1]);
     const col16 = clean(row[16]);
 
     // Financial Summary Island (Col 16-23)
-    // Check if col16 is a driver and col17 is points or if it's the header
     if (col16 && col16 !== "Driver" && col16 !== "DRIVERS" && row.length > 17) {
       const points = parseInteger(row[17]);
       const charges = parseAmount(row[18]);
@@ -489,19 +609,32 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
       }
     }
 
+    // Identify Section Markers
     if (/SUPPLEMENT|RENEWAL/i.test(col0)) {
       currentSection = "fleet";
-    } else if (col0 === "" && clean(row[1]) === "Spent For") {
-      currentSection = "unknown"; // End of fleet section
+    } else if (col0 === "" && col1 === "Spent For") {
+      currentSection = "unknown";
     }
 
+    // Collect driver charges and fleet rows from the base sheet.
     if (currentSection === "fleet") {
       fleetCostRows.push(row);
-    } else if (/^(NO|OOS|YES|REVIEW)$/i.test(col0)) {
-      inspectionRows.push(row);
     } else if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(col0)) {
-      driverChargeRows.push(row);
+      // Looks like a driver charge
+      const chargeKey = `${col0}_${col1}_${clean(row[2])}`;
+      if (!seenChargeKeys.has(chargeKey)) {
+        driverChargeRows.push(row);
+        seenChargeKeys.add(chargeKey);
+      }
     }
+  }
+
+  for (const row of inspectionDataRows) {
+    if (isInspectionFooterRow(row, inspectionColumns)) continue;
+    const reportNo = clean(row[inspectionColumns.reportNo]);
+    const inspectionDate = clean(row[inspectionColumns.inspectionDate]);
+    if (!reportNo || !inspectionDate) continue;
+    inspectionRows.push(row);
   }
 
   const driverCharges = loadDriverChargeRecords(driverChargeRows);
@@ -522,6 +655,7 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
   const matchedChargeIndices = new Set<number>();
   const inspectionRecords = loadInspectionRecords(
     inspectionRows,
+    inspectionColumns,
     driverCharges,
     matchedChargeIndices,
     fleetLookupByVin,
@@ -529,10 +663,23 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
     complianceSummaries,
   );
 
+  const footerRow = inspectionDataRows.find((row) => isInspectionFooterRow(row, inspectionColumns));
+  const inspectionSheetSummary =
+    footerRow ? parseInspectionSheetSummary(footerRow, inspectionColumns) : {
+      totalInspectionPoints: inspectionRecords.reduce((sum, record) => sum + record.totalViolationPoints, 0),
+      totalCharges: inspectionRecords.reduce((sum, record) => sum + record.chargeAmount, 0),
+      unsafeDrivingPoints: 0,
+      hosPoints: 0,
+      vehicleMaintenancePoints: 0,
+      driverFitnessPoints: 0,
+      insuranceAndOtherPoints: 0,
+      categoryPointsTotal: inspectionRecords.reduce((sum, record) => sum + record.totalViolationPoints, 0),
+    };
+
   const virtualInspections: InspectionRecord[] = driverCharges
     .filter((_, i) => !matchedChargeIndices.has(i))
     .map((dc) => ({
-      status: "NO",
+      status: "Clean Inspection",
       reportNo: "NON-INSPECTION",
       inspectionDate: dc.inspectionDate,
       fmcsaPostDate: dc.inspectionDate,
@@ -562,6 +709,11 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
       alcoholSubstanceReason: undefined,
       crashIndicatorReason: undefined,
       documentsRegistrationReason: /plate|registration|ifta|cab card|document|license/i.test(dc.reason) ? dc.reason : undefined,
+      unsafeDrivingPoints: 0,
+      hosPoints: 0,
+      vehicleMaintenancePoints: 0,
+      driverFitnessPoints: 0,
+      insuranceAndOtherPoints: 0,
       unit: "",
       year: 0,
       make: "",
@@ -576,5 +728,6 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
     inspectionRecords: [...inspectionRecords, ...virtualInspections],
     driverChargeRecords: driverCharges,
     fleetCostRecords,
+    inspectionSheetSummary,
   };
 }

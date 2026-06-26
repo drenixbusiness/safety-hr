@@ -2,8 +2,8 @@ declare module 'react-simple-maps' {
   import * as React from 'react';
 
   export interface ComposableMapProps {
-    projection?: string | ((...args: any[]) => any);
-    projectionConfig?: any;
+    projection?: string | ((...args: unknown[]) => unknown);
+    projectionConfig?: Record<string, unknown>;
     width?: number;
     height?: number;
     style?: React.CSSProperties;
@@ -13,16 +13,18 @@ declare module 'react-simple-maps' {
 
   export const ComposableMap: React.FC<ComposableMapProps>;
 
-  export interface GeographiesProps {
-    geography?: string | Record<string, any> | string[];
-    children?: (props: { geographies: any[]; outline: any; borders: any }) => React.ReactNode;
-    parseGeographies?: (geographies: any[]) => any[];
+  export interface GeographiesProps<TGeography = unknown> {
+    geography?: string | Record<string, unknown> | string[];
+    children?: (props: { geographies: TGeography[]; outline: unknown; borders: unknown }) => React.ReactNode;
+    parseGeographies?: (geographies: TGeography[]) => TGeography[];
   }
 
-  export const Geographies: React.FC<GeographiesProps>;
+  export const Geographies: <TGeography = unknown>(
+    props: GeographiesProps<TGeography>
+  ) => React.ReactElement | null;
 
   export interface GeographyProps {
-    geography?: any;
+    geography?: unknown;
     fill?: string;
     stroke?: string;
     strokeWidth?: number;
@@ -67,9 +69,9 @@ declare module 'react-simple-maps' {
     subject: [number, number];
     dx?: number;
     dy?: number;
-    connectorProps?: any;
+    connectorProps?: Record<string, unknown>;
     children?: React.ReactNode;
-    [key: string]: any;
+    [key: string]: unknown;
   }
 
   export const Annotation: React.FC<AnnotationProps>;

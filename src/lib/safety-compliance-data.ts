@@ -1,14 +1,12 @@
-export type InspectionStatus = "OOS"| "NO";
+export type InspectionStatus = "OOS"| "Clean Inspection";
 export type InspectionLevel = "DRIVER-ONLY" | "WALK-AROUND" | "FULL";
 export type RiskLevel = "Low" | "Medium" | "High";
 export type ViolationCategory =
-  | "Unsafe Driving"
-  | "Hours-of-Service Compliance"
-  | "Vehicle Maintenance"
-  | "Crash Indicator"
-  | "Controlled Substances and Alcohol"
-  | "Documents / Registration"
-  | "Other";
+  | "UNSAFE DRIVING"
+  | "HOS"
+  | "VEHICLE MAINTENANCE"
+  | "DRIVER FITNESS"
+  | "INSURANCE AND OTHER";
 
 export type InspectionRecord = {
   status: InspectionStatus;
@@ -39,6 +37,11 @@ export type InspectionRecord = {
   alcoholSubstanceReason?: string;
   crashIndicatorReason?: string;
   documentsRegistrationReason?: string;
+  unsafeDrivingPoints: number;
+  hosPoints: number;
+  vehicleMaintenancePoints: number;
+  driverFitnessPoints: number;
+  insuranceAndOtherPoints: number;
   unit: string;
   year: number;
   make: string;
@@ -85,13 +88,11 @@ export const inspectionLevels = [
 
 export const riskLevels = ["Low", "Medium", "High"] as const;
 export const violationCategories = [
-  "Unsafe Driving",
-  "Hours-of-Service Compliance",
-  "Vehicle Maintenance",
-  "Crash Indicator",
-  "Controlled Substances and Alcohol",
-  "Documents / Registration",
-  "Other",
+  "UNSAFE DRIVING",
+  "HOS",
+  "VEHICLE MAINTENANCE",
+  "DRIVER FITNESS",
+  "INSURANCE AND OTHER",
 ] as const;
 
 export const expenseTypes = [
@@ -131,6 +132,23 @@ export function monthLabelFromKey(value: string) {
     month: "short",
   }).format(new Date(year, month - 1, 1));
 }
+
+export function recentSixMonthRange(maxDate: string) {
+  if (!maxDate) return { startDate: "", endDate: "" };
+
+  const end = new Date(`${maxDate}T00:00:00`);
+  if (Number.isNaN(end.getTime())) {
+    return { startDate: "", endDate: "" };
+  }
+
+  const start = new Date(end.getFullYear(), end.getMonth() - 5, 1);
+  const endOfMonth = new Date(end.getFullYear(), end.getMonth() + 1, 0);
+
+  return {
+    startDate: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-01`,
+    endDate: `${endOfMonth.getFullYear()}-${String(endOfMonth.getMonth() + 1).padStart(2, "0")}-${String(endOfMonth.getDate()).padStart(2, "0")}`,
+  };
+}
 export function normalizeName(value: string) {
   return (value ?? "")
       .replace(/\u00a0/g, " ")
@@ -149,21 +167,16 @@ export function riskLabelFromPoints(points: number): RiskLevel {
 }
 
 export function canonicalizeFinancialReason(reason: string): string {
-  const upper = reason.toUpperCase();
-  if (upper.includes("FAKE PLATE")) return "Fake Plate";
-  if (upper.includes("FAKE IFTA")) return "Fake IFTA Stickers";
-  if (upper === "NO VIOLATIONS") return "No violations";
+  const upper = (reason || "").toUpperCase();
+  if (upper.includes("FAKE PLATE")) return "FAKE PLATE";
+  if (upper.includes("FAKE IFTA")) return "FAKE IFTA STICKERS";
+  if (upper.includes("NO VIOLATION")) return "NO VIOLATIONS";
 
-  // Map other specific violations to Citation to match the four types in the data
-  if (
-    /eld|duty|hours|tire|brake|light|wheel|rim|speed|unsafe|laws|392|395|operate|failed|citation/i.test(
-      upper,
-    )
-  ) {
-    return "Citation";
+  if (upper && upper !== "UNKNOWN" && upper !== "NONE") {
+    return "CITATION";
   }
 
-  return "Citation"; // Default to Citation if there's any other reason
+  return "NO VIOLATIONS";
 }
 
 export function categoryFromReason(reason: string): ViolationCategory {
@@ -172,38 +185,43 @@ export function categoryFromReason(reason: string): ViolationCategory {
     value.includes("speed") ||
     value.includes("unsafe") ||
     value.includes("state") ||
-    value.includes("local")
+    value.includes("local") ||
+    value.includes("lane") ||
+    value.includes("signal") ||
+    value.includes("traffic")
   ) {
-    return "Unsafe Driving";
+    return "UNSAFE DRIVING";
   }
-  if (value.includes("eld") || value.includes("duty") || value.includes("hours")) {
-    return "Hours-of-Service Compliance";
+  if (
+    value.includes("eld") ||
+    value.includes("duty") ||
+    value.includes("hours") ||
+    value.includes("hos") ||
+    value.includes("log")
+  ) {
+    return "HOS";
   }
   if (
     value.includes("tire") ||
     value.includes("brake") ||
     value.includes("light") ||
     value.includes("wheel") ||
-    value.includes("rim")
+    value.includes("rim") ||
+    value.includes("maint") ||
+    value.includes("load") ||
+    value.includes("secure") ||
+    value.includes("equipment")
   ) {
-    return "Vehicle Maintenance";
-  }
-  if (value.includes("crash")) {
-    return "Crash Indicator";
-  }
-  if (value.includes("alcohol") || value.includes("controlled") || value.includes("substance")) {
-    return "Controlled Substances and Alcohol";
+    return "VEHICLE MAINTENANCE";
   }
   if (
-    value.includes("plate") ||
-    value.includes("registration") ||
-    value.includes("cab card") ||
-    value.includes("ifta") ||
-    value.includes("documents") ||
-    value.includes("driver's license")
+    value.includes("medical") ||
+    value.includes("fitness") ||
+    value.includes("qualification") ||
+    value.includes("cdl") ||
+    value.includes("physic")
   ) {
-    return "Documents / Registration";
+    return "DRIVER FITNESS";
   }
-  return "Other";
+  return "INSURANCE AND OTHER";
 }
-
