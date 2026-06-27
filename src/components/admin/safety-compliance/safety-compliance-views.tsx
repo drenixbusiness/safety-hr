@@ -1304,7 +1304,7 @@ function InspectionsSection() {
                     </ResponsiveContainer>
                 </ChartCard>
 
-                <ChartCard title="OOS vs Clean Inspection" icon={CircleAlert}>
+                <ChartCard title="OOS and Total Inspection" icon={CircleAlert}>
                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                         <BarChart data={analytics.monthlyInspection}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7"/>
@@ -1312,7 +1312,7 @@ function InspectionsSection() {
                             <YAxis tick={{fontSize: 12}}/>
                             <Tooltip content={<ChartTooltip/>}/>
                             <Legend/>
-                            <Bar dataKey="clean" name="Clean Inspection" fill="#10b981" stackId="a" radius={[0, 0, 0, 0]}/>
+                            <Bar dataKey="clean" name="Total Inspection" fill="#10b981" stackId="a" radius={[0, 0, 0, 0]}/>
                             <Bar dataKey="oos" name="OOS" fill="#ef4444" stackId="a" radius={[4, 4, 0, 0]}/>
                         </BarChart>
                     </ResponsiveContainer>
@@ -1751,11 +1751,7 @@ function ViolationCategoriesSection() {
                 category,
                 values: matrixMonthColumns.map((month) =>
                     periodInspections
-                        .filter(
-                            (record) =>
-                                monthKey(record.inspectionDate) === month &&
-                                record.violationCategory === category,
-                        )
+                        .filter((record) => monthKey(record.inspectionDate) === month)
                         .reduce((sum, record) => sum + pointsForCategory(record, category), 0),
                 ),
             })),
@@ -1772,11 +1768,9 @@ function ViolationCategoriesSection() {
 
     return (
         <section className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
                 <MetricCard label="Compliance Violations" value={String(complianceRows.length)} icon={ShieldAlert} tone="negative" />
                 <MetricCard label="Drivers Involved" value={String(driversInvolved)} icon={Truck} />
-                <MetricCard label="Most Common Category" value={topCategory} icon={CircleAlert} />
-                <MetricCard label="Total Driver Charges" value={formatMoney(totalDriverCharges)} icon={DollarSign} tone="negative" />
             </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
@@ -1884,17 +1878,20 @@ function ViolationCategoriesSection() {
                         </PieChart>
                     </ResponsiveContainer>
                 </ChartCard>
-                <ChartCard title="Number of Charges by Reason" icon={CircleAlert}>
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                        <BarChart data={countByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                            <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
-                            <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
-                            <Tooltip content={<ChartTooltip />} />
-                            <Bar dataKey="value" name="Charge Count" fill="#f59e0b" radius={[0, 8, 8, 0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </ChartCard>
+                <div className="xl:col-span-2" style={{ gridColumn: "1 / -1" }}>
+                    <ChartCard title="Number of Charges by Reason" icon={CircleAlert}>
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                            <BarChart data={countByReason} layout="vertical" margin={{ left: 8, right: 16 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                                <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
+                                <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
+                                <Tooltip content={<ChartTooltip />} />
+                                <Bar dataKey="value" name="Charge Count" fill="#f59e0b" radius={[0, 8, 8, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </ChartCard>
+
+                </div>
             </div>
 
             <ChartCard
@@ -2072,8 +2069,6 @@ function FleetAndPlateCostsSection() {
                             tone="negative"/>
                 <MetricCard label="Total Renewal Cost" value={formatCurrency(analytics.totalRenewalCost)}
                             icon={DollarSign} tone="negative"/>
-                {/*<MetricCard label="Total Registration Cost" value={formatCurrency(analytics.totalRegistrationCost)}*/}
-                {/*            icon={DollarSign} tone="negative"/>*/}
                 <MetricCard label="Total Supplement Cost" value={formatCurrency(analytics.totalSupplementCost)}
                             icon={DollarSign} tone="negative"/>
                 <MetricCard label="Most Expensive Unit" value={analytics.topFleetUnit} icon={BarChart3}/>
