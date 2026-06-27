@@ -331,7 +331,8 @@ function loadInspectionRecords(
         ? Array.from(detectedReasons).join("; ")
         : "No violations";
 
-      const chargeAmount = matchedCharge?.amount ?? parseAmount(row[columns.charges]);
+      const sheetCharges = parseAmount(row[columns.charges]);
+      const chargeAmount = matchedCharge?.amount ?? sheetCharges;
       const violationCategory = categoryFromReason(finalReason);
       const companyExpenseImpact = /registration|plate|ifta|towing|portal/i.test(finalReason)
         ? chargeAmount
@@ -395,6 +396,7 @@ function loadInspectionRecords(
         vehiclePlate: clean(row[columns.vehiclePlate]),
         points: totalViolationPoints,
         charges: chargeAmount,
+        sheetCharges,
         incomeAmount: finSummary?.charges ?? chargeAmount,
         totalViolationPoints,
         chargeAmount,
@@ -531,7 +533,6 @@ function extractSheetId(input: string): string {
   const trimmed = input.trim();
   const match = trimmed.match(/spreadsheets\/d\/([^/]+)/);
   if (match) return match[1];
-  // Accept bare ID fallback
   if (/^[A-Za-z0-9-_]+$/.test(trimmed)) return trimmed;
   throw new Error("Invalid DATA env var. Expecting full Google Sheet URL or spreadsheet ID.");
 }
@@ -546,7 +547,6 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
   const inspectionTabRows: CsvRow[] = [];
   const baseRows: CsvRow[] = [];
 
-  // 1. Fetch from specific tab (gid=1177354161)
   const inspectionsUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=1177354161`;
   try {
     const res = await fetch(inspectionsUrl, { cache: "no-store" });
@@ -558,7 +558,6 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
     console.error("Failed to fetch inspections tab", error);
   }
 
-  // 2. Fetch from base sheet(s)
   const baseUrls = [
     `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`,
     `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`,
@@ -604,7 +603,6 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
     const col1 = clean(row[1]);
     const col16 = clean(row[16]);
 
-    // Financial Summary Island (Col 16-23)
     if (col16 && col16 !== "Driver" && col16 !== "DRIVERS" && row.length > 17) {
       const points = parseInteger(row[17]);
       const charges = parseAmount(row[18]);
@@ -623,7 +621,6 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
       }
     }
 
-    // Identify Compliance Summary start
     if (col16 === "DRIVERS" && clean(row[17]).includes("Unsafe")) {
       inComplianceSummary = true;
       continue;
@@ -644,18 +641,15 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
       }
     }
 
-    // Identify Section Markers
     if (/SUPPLEMENT|RENEWAL/i.test(col0)) {
       currentSection = "fleet";
     } else if (col0 === "" && col1 === "Spent For") {
       currentSection = "unknown";
     }
 
-    // Collect driver charges and fleet rows from the base sheet.
     if (currentSection === "fleet") {
       fleetCostRows.push(row);
     } else if (/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/.test(col0)) {
-      // Looks like a driver charge
       const chargeKey = `${col0}_${col1}_${clean(row[2])}`;
       if (!seenChargeKeys.has(chargeKey)) {
         driverChargeRows.push(row);
@@ -726,6 +720,7 @@ export async function loadSafetyComplianceData(): Promise<LoadedSafetyCompliance
       vehiclePlate: "",
       points: 0,
       charges: dc.amount,
+      sheetCharges: 0,
       totalViolationPoints: 0,
       chargeAmount: dc.amount,
       violationReason: dc.reason,

@@ -606,7 +606,7 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
             if (!abbr || !STATE_NAMES[abbr]) return;
             const s = ensure(abbr);
             s.inspections += 1;
-            s.violations += Number.isFinite(record.oosViolations) ? record.oosViolations : 0;
+            if (record.points > 0) s.violations += 1;
             s.points += Number.isFinite(record.points) ? record.points : 0;
 
             const lvl = (record.inspectionLevel || "").toString().toUpperCase();
@@ -828,7 +828,7 @@ function StateAnalytics({inspections}: { inspections: InspectionRecord[] }) {
         inspections.forEach(record => {
             if (!record.state || !stateStats[record.state]) return;
             stateStats[record.state].inspections += 1;
-            stateStats[record.state].violations += record.oosViolations;
+            if (record.points > 0) stateStats[record.state].violations += 1;
             stateStats[record.state].points += record.points;
         });
 
@@ -999,7 +999,7 @@ function useAnalytics() {
             0,
         );
         const totalCharges = filteredInspections.reduce(
-            (sum, record) => sum + record.incomeAmount,
+            (sum, record) => sum + record.sheetCharges,
             0,
         );
         const totalCompanyExpense = filteredDriverCharges.reduce(
@@ -1110,7 +1110,7 @@ function useAnalytics() {
             cleanInspections: filteredInspections.filter(
                 (record) => record.totalViolationPoints === 0,
             ),
-            totalIncome: filteredInspections.reduce((sum, r) => sum + r.incomeAmount, 0),
+            totalIncome: filteredInspections.reduce((sum, r) => sum + r.sheetCharges, 0),
             totalDriverOutcome: filteredDriverCharges.reduce((sum, r) => sum + r.amount, 0),
             incomeByDriver: Array.from(
                 filteredInspections.reduce<Map<string, number>>((map, r) => {
@@ -1264,6 +1264,14 @@ function DashboardSection() {
 
 function InspectionsSection() {
     const analytics = useAnalytics();
+    const { selectedMonths } = useViolationCategoryMonthSelection();
+
+    const mapInspections = useMemo(() => {
+        const base = analytics.filteredInspections.filter(r => r.reportNo !== "NON-INSPECTION" && r.points > 0);
+        if (!selectedMonths.length) return base;
+        const selected = new Set(selectedMonths);
+        return base.filter(r => selected.has(monthKey(r.inspectionDate)));
+    }, [analytics.filteredInspections, selectedMonths]);
 
     return (
         <PageSection
@@ -1343,8 +1351,8 @@ function InspectionsSection() {
                     </ResponsiveContainer>
                 </ChartCard>
             </div>
-            <USAStateMap inspections={analytics.filteredInspections.filter(r => r.reportNo !== "NON-INSPECTION")} />
-            <StateAnalytics inspections={analytics.filteredInspections.filter(r => r.reportNo !== "NON-INSPECTION")} />
+            <USAStateMap inspections={mapInspections} />
+            <StateAnalytics inspections={mapInspections} />
             <DataTable<InspectionRecord>
                 title="Inspection Records"
                 rows={analytics.filteredInspections.filter(

@@ -20,14 +20,6 @@ import type { InspectionSheetSummary } from "@/lib/safety-compliance-types";
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MAX_YEAR = 2026;
 
-// SSR-safe client detection — no setState-in-effect lint warning
-function useIsClient() {
-  return useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
-}
 
 function CompactMetricCard({ label, value }: { label: string; value: string }) {
   return (
@@ -188,6 +180,14 @@ function MonthYearPicker() {
         </div>
       )}
     </div>
+  );
+}
+
+function useIsClient() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
   );
 }
 

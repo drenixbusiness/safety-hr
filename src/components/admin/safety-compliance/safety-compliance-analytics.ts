@@ -113,7 +113,7 @@ export function aggregateMonthlyInspectionData(records: InspectionRecord[]) {
     bucket.totalPoints += record.totalViolationPoints;
     bucket.totalCharges += record.charges;
     bucket.inspectionCount += 1;
-    bucket.totalIncome += record.incomeAmount;
+    bucket.totalIncome += record.sheetCharges;
     bucket.oosCount += record.status === "OOS" ? 1 : 0;
     buckets.set(key, bucket);
   }
@@ -490,25 +490,18 @@ export function aggregateSafetyLossByCategory(records: InspectionRecord[]) {
 
 export function buildMonthlyCategoryTrend(records: InspectionRecord[]) {
   const months = Array.from(new Set(records.map((record) => monthKey(record.inspectionDate)))).sort();
-  const categories = [
-    "UNSAFE DRIVING",
-    "HOS",
-    "VEHICLE MAINTENANCE",
-    "DRIVER FITNESS",
-    "INSURANCE AND OTHER",
-  ] as const;
 
   return months.map((month) => {
-    const entry: Record<string, number | string> = { month, label: monthLabelFromKey(month) };
-    for (const category of categories) {
-      entry[category] = records
-        .filter((record) => {
-          if (monthKey(record.inspectionDate) !== month) return false;
-          return record.violationCategory === category;
-        })
-        .reduce((sum, r) => sum + r.totalViolationPoints, 0);
-    }
-    return entry;
+    const monthRecords = records.filter((r) => monthKey(r.inspectionDate) === month);
+    return {
+      month,
+      label: monthLabelFromKey(month),
+      "UNSAFE DRIVING": monthRecords.reduce((sum, r) => sum + (r.unsafeDrivingPoints || 0), 0),
+      "HOS": monthRecords.reduce((sum, r) => sum + (r.hosPoints || 0), 0),
+      "VEHICLE MAINTENANCE": monthRecords.reduce((sum, r) => sum + (r.vehicleMaintenancePoints || 0), 0),
+      "DRIVER FITNESS": monthRecords.reduce((sum, r) => sum + (r.driverFitnessPoints || 0), 0),
+      "INSURANCE AND OTHER": monthRecords.reduce((sum, r) => sum + (r.insuranceAndOtherPoints || 0), 0),
+    };
   });
 }
 

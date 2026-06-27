@@ -21,6 +21,7 @@ export type InspectionRecord = {
   vehiclePlate: string;
   points: number;
   charges: number;
+  sheetCharges: number;
   totalViolationPoints: number;
   chargeAmount: number;
   violationReason: string;
