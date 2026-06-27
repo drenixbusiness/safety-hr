@@ -88,6 +88,32 @@ function clean(value: string | undefined) {
   return (value ?? "").replace(/\u00a0/g, " ").trim();
 }
 
+// Normalize a raw state value from the sheet to a 2-letter USPS abbreviation.
+// Accepts both "TX" and "Texas".
+const STATE_NAME_TO_ABBREV: Record<string, string> = {
+  "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA",
+  "colorado":"CO","connecticut":"CT","delaware":"DE","florida":"FL","georgia":"GA",
+  "hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN","iowa":"IA",
+  "kansas":"KS","kentucky":"KY","louisiana":"LA","maine":"ME","maryland":"MD",
+  "massachusetts":"MA","michigan":"MI","minnesota":"MN","mississippi":"MS","missouri":"MO",
+  "montana":"MT","nebraska":"NE","nevada":"NV","new hampshire":"NH","new jersey":"NJ",
+  "new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND","ohio":"OH",
+  "oklahoma":"OK","oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC",
+  "south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT",
+  "virginia":"VA","washington":"WA","west virginia":"WV","wisconsin":"WI","wyoming":"WY",
+  "district of columbia":"DC",
+};
+
+const VALID_STATE_ABBREVS = new Set(Object.values(STATE_NAME_TO_ABBREV));
+
+function normalizeState(raw: string): string | undefined {
+  if (!raw) return undefined;
+  const upper = raw.trim().toUpperCase();
+  if (VALID_STATE_ABBREVS.has(upper)) return upper;
+  const fromName = STATE_NAME_TO_ABBREV[raw.trim().toLowerCase()];
+  return fromName ?? undefined;
+}
+
 function parseAmount(value: string | undefined) {
   const cleaned = clean(value).replace(/[$,]/g, "").replace(/\s+/g, "");
   const numeric = Number(cleaned);
@@ -155,10 +181,11 @@ type InspectionSheetColumns = {
   vehicleMaintenancePoints: number;
   driverFitnessPoints: number;
   insuranceAndOtherPoints: number;
+  state?: number;
 };
 
 function buildInspectionColumns(headers: CsvRow): InspectionSheetColumns {
-  const columns = {
+  const required = {
     inspectionDate: findColumnIndex(headers, ["Inspection Date"]),
     reportNo: findColumnIndex(headers, ["Report #", "Report No", "Report"]),
     fmcsaPostDate: findColumnIndex(headers, ["FMCSA Post Date"]),
@@ -174,14 +201,19 @@ function buildInspectionColumns(headers: CsvRow): InspectionSheetColumns {
     vehicleMaintenancePoints: findColumnIndex(headers, ["VEHICLE MAINTANCE", "VEHICLE MAINTENANCE"]),
     driverFitnessPoints: findColumnIndex(headers, ["DRIVER FITNESS"]),
     insuranceAndOtherPoints: findColumnIndex(headers, ["INURANCE AND OTHER", "INSURANCE AND OTHER"]),
-  } satisfies InspectionSheetColumns;
+  };
 
-  const missing = Object.entries(columns).filter(([, index]) => index < 0).map(([name]) => name);
+  const missing = Object.entries(required).filter(([, index]) => index < 0).map(([name]) => name);
   if (missing.length) {
     throw new Error(`Inspection sheet is missing expected columns: ${missing.join(", ")}`);
   }
 
-  return columns;
+  const stateIndex = findColumnIndex(headers, ["State", "Inspection State", "ST", "State Code"]);
+
+  return {
+    ...required,
+    ...(stateIndex >= 0 ? { state: stateIndex } : {}),
+  };
 }
 
 function isInspectionFooterRow(row: CsvRow, columns: InspectionSheetColumns) {
@@ -393,6 +425,9 @@ function loadInspectionRecords(
         totalPrice: chargeAmount,
         expenseType: companyExpenseImpact > 0 ? "Company Expense" : "Driver Charges",
         violationCategory,
+        state: (columns.state !== undefined && columns.state >= 0)
+          ? normalizeState(clean(row[columns.state]))
+          : undefined,
       } satisfies InspectionRecord;
     });
 }

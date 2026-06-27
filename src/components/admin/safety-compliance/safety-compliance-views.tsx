@@ -609,7 +609,6 @@ function USAStateMap({inspections}: { inspections: InspectionRecord[] }) {
             s.violations += Number.isFinite(record.oosViolations) ? record.oosViolations : 0;
             s.points += Number.isFinite(record.points) ? record.points : 0;
 
-            // Map inspection level to Level 1/2/3 buckets per spec
             const lvl = (record.inspectionLevel || "").toString().toUpperCase();
             const key = lvl === "FULL" ? "1" : lvl === "WALK-AROUND" ? "2" : lvl === "DRIVER-ONLY" ? "3" : undefined;
             if (key) s.levels[key] = (s.levels[key] || 0) + 1;
