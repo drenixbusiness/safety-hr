@@ -40,7 +40,6 @@ export default function OverviewPage() {
       }
     >
       <div className="space-y-6">
-        {/*<MetricGrid />*/}
         <div className="grid gap-6 xl:grid-cols">
           <TemplateCard title="List of HR's " />
         </div>

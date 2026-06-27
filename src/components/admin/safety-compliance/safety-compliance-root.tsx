@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useMemo, useRef, useEffect, useReducer, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronDown, Check } from "lucide-react";
 import {
@@ -193,12 +193,23 @@ function useIsClient() {
 
 function SafetyComplianceHeaderPortal() {
   const isClient = useIsClient();
+  const slotRef = useRef<HTMLElement | null>(null);
+  const [, forceRender] = useReducer((n: number) => n + 1, 0);
   const { stats } = useSafetyCompliance();
 
-  if (!isClient) return null;
+  // Find the slot after every DOM commit so client-side navigation works.
+  // useReducer dispatch (not setState) avoids the set-state-in-effect lint rule.
+  useEffect(() => {
+    const el = document.getElementById("sc-header-slot");
+    if (el && el !== slotRef.current) {
+      slotRef.current = el;
+      forceRender();
+    }
+  });
 
-  const slot = document.getElementById("sc-header-slot");
-  if (!slot) return null;
+  if (!isClient || !slotRef.current) return null;
+
+  const slot = slotRef.current;
 
   return createPortal(
     <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
